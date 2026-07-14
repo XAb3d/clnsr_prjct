@@ -44,3 +44,19 @@ Status: CLOSED — Already fixed prior to sprint.
 Evidence: Explicit check at Home.razor line 1927 compares
 NormalizeAccountNumber(account.Data) == NormalizeCustomerId(customer.Data)
 and calls AddCellError() on both fields with clear messages.
+
+── SPRINT 2 CLOSURE NOTES ──────────────────────────────────────────────
+Date: 2026-07-14
+
+Issue #8  — Empty BUS FacilityAccNum Not Flagged
+Status: CLOSED — Already fixed prior to sprint.
+Evidence: NormalizeAccountAndCustomerFields() called for BUS records at
+Home.razor line 5002. Empty accnum path (line 1891) adds error
+"FACILITYACCNUM: MISSING FACILITY ACCOUNT NUMBER" via AddCellError().
+
+Issue #9-BUS — Guarantor Address & Telephone Numbers Deleted
+Status: CLOSED — Verified as expected behaviour / already correct.
+Evidence: G1Add1/2/3, G2Add1/2/3 in BusinessDataTransformer.cs (lines
+1452-1454, 1707-1709) pass through cleanly via RemoveSystemErroNames().
+G1HomeTel, G1WorkTel, G2HomeTel, G2WorkTel (lines 1455-1487, 1710-1745)
+empty invalid phone numbers — confirmed as agreed behaviour.

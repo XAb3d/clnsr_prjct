@@ -1297,99 +1297,61 @@ public class IndividualDataTransformer
     public CellDataAndStatus PaymentHistoryProfile(string data)
     {
         var cellData = new CellDataAndStatus(data);
-        data = data.Trim().Replace(" ","");
+        data = data.Trim().Replace(" ", "");
         data = stringHelper.RemoveSystemErroNames(data).ToUpper();
+
         if (string.IsNullOrWhiteSpace(data))
         {
-            data = string.Empty;
+            cellData.Data = string.Empty;
+            return cellData;
         }
 
-        // Normalize input to lowercase string for easy matching
-        string value = data.ToString().Trim().ToLower();
+        // Normalize to lowercase for string matching
+        string value = data.Trim().ToLower();
 
-        // Try to parse an integer if entered
+        // ── Valid final codes (0–5) passed directly by subscriber — preserve as-is ──
+        // Must be checked BEFORE the day-range integer parse to avoid misreading "1"–"5"
+        // as day counts (1 day, 2 days, etc.) and converting them incorrectly.
+        var validFinalCodes = new HashSet<string> { "0", "1", "2", "3", "4", "5" };
+        if (validFinalCodes.Contains(value))
+        {
+            cellData.Data = value;
+            return cellData;
+        }
+
+        // ── Day-count integers: convert to standard code ──────────────────────────
+        // Subscribers sometimes send the number of days in arrears rather than the code.
         if (int.TryParse(value, out int days))
         {
-            if (days >= 1 && days <= 30) data = "0";
-            if (days >= 31 && days <= 60) data = "1";
-            if (days >= 61 && days <= 90) data = "2";
-            if (days >= 91 && days <= 120) data = "3";
-            if (days >= 121 && days <= 180) data = "4";
-            if (days > 180) data = "5";
+            if (days >= 1 && days <= 30)        cellData.Data = "0";
+            else if (days >= 31 && days <= 60)  cellData.Data = "1";
+            else if (days >= 61 && days <= 90)  cellData.Data = "2";
+            else if (days >= 91 && days <= 120)  cellData.Data = "3";
+            else if (days >= 121 && days <= 180) cellData.Data = "4";
+            else if (days > 180)                 cellData.Data = "5";
+            else                                 cellData.Data = string.Empty;
+            return cellData; // early return — integer input fully handled
         }
 
-        // Handle various string inputs (full and short forms)
-        if (value.Contains("current")) data = "0";
-
-        // Handle common variations
-        else if (value.Contains("1-30") || value.Contains("1to30")) data = "0";
-        else if (value.Contains("31-60") || value.Contains("31to90")) data = "1";
-        else if (value.Contains("61-90") || value.Contains("91to180")) data = "2";
-        else if (value.Contains("91-120") || value.Contains("91to180")) data = "3";
-        else if (value.Contains("121-180") || value.Contains("91to180")) data = "4";
-        else if (value.Contains("181-360") || value.Contains("181to360")) data = "5";
+        // ── Descriptive string inputs ─────────────────────────────────────────────
+        if      (value.Contains("current") || value.Contains("1-30")    || value.Contains("1to30"))    cellData.Data = "0";
+        else if (value.Contains("31-60")   || value.Contains("31to60"))                                cellData.Data = "1";
+        else if (value.Contains("61-90")   || value.Contains("61to90"))                                cellData.Data = "2";
+        else if (value.Contains("91-120")  || value.Contains("91to120"))                               cellData.Data = "3";
+        else if (value.Contains("121-180") || value.Contains("121to180"))                              cellData.Data = "4";
+        else if (value.Contains("181")     || value.Contains("181to360") || value.Contains("over 180")) cellData.Data = "5";
         else
         {
-            data = string.Empty; // Return empty if no match
+            // Input does not match any known pattern — preserve original rather than silently wiping
+            cellData.Data = data.Trim();
         }
-        cellData.Data = data;
+
         return cellData;
 
 
 
 
 
-        //var cellData = new CellDataAndStatus(data);
-        //data = stringHelper.RemoveSystemErroNames(data);
-
-        //// If the input is null or whitespace, set data to empty and return immediately.
-        //if (string.IsNullOrWhiteSpace(data))
-        //{
-        //    cellData.Data = string.Empty;
-        //    return cellData;
-        //}
-
-        //// Normalize: trim, convert to lowercase, and remove all spaces to ensure consistent comparison.
-        //string normalized = data.Trim().ToLower().Replace(" ", "");
-
-        //// Attempt to parse the normalized string as an integer.
-        //if (int.TryParse(normalized, out int days))
-        //{
-        //    if (days >= 1 && days <= 30)
-        //        data = "0";
-        //    else if (days >= 31 && days <= 60)
-        //        data = "1";
-        //    else if (days >= 61 && days <= 90)
-        //        data = "2";
-        //    else if (days >= 91 && days <= 120)
-        //        data = "3";
-        //    else if (days >= 121 && days <= 180)
-        //        data = "4";
-        //    else if (days > 180)
-        //        data = "5";
-        //}
-        //else
-        //{
-        //    // Handle string inputs based on key patterns.
-        //    // The normalized string has no spaces (e.g., "1to30days(currentaccount)" becomes "1to30days(currentaccount)").
-        //    if (normalized.Contains("currentaccount") || normalized.Contains("1to30"))
-        //        data = "0";
-        //    else if (normalized.Contains("31to60"))
-        //        data = "1";
-        //    else if (normalized.Contains("61to90"))
-        //        data = "2";
-        //    else if (normalized.Contains("91to120"))
-        //        data = "3";
-        //    else if (normalized.Contains("121to180"))
-        //        data = "4";
-        //    else if (normalized.Contains("180+") || (normalized.Contains("pastdue") && normalized.Contains("180")))
-        //        data = "5";
-        //    else
-        //        data = string.Empty;
-        //}
-
-        //cellData.Data = data;
-        //return cellData;
     }
     public CellDataAndStatus AmtOverdue1to30days(string data)
     {
@@ -1527,18 +1489,67 @@ public class IndividualDataTransformer
     {
         var cellData = new CellDataAndStatus(data);
         data = stringHelper.RemoveSystemErroNames(data);
-        var date = stringHelper.CheckDate(data);
-        if (date.IsValidFormat)
-        {
-            cellData.Data = data;
-            return cellData;
-        }
-        else
-        {
 
+        if (string.IsNullOrWhiteSpace(data))
+        {
             cellData.Data = string.Empty;
             return cellData;
         }
+
+        // Attempt to normalise common subscriber date formats into yyyyMMdd
+        // before passing to CheckDate(), which only accepts yyyyMMdd.
+        // Formats handled: yyyy-MM-dd, dd/MM/yyyy, dd-MM-yyyy, MM/dd/yyyy,
+        //                  yyyyMMdd (already correct), dd MMM yyyy, etc.
+        string normalised = TryNormaliseDateToYyyyMMdd(data.Trim()) ?? data.Trim();
+
+        var date = stringHelper.CheckDate(normalised);
+        if (date.IsValidFormat)
+        {
+            cellData.Data = normalised; // always store in yyyyMMdd
+            return cellData;
+        }
+
+        // Not a recognisable date — preserve original value rather than silently wiping
+        cellData.Data = data.Trim();
+        return cellData;
+    }
+
+    /// <summary>
+    /// Attempts to parse a date string in various common formats and return it
+    /// as yyyyMMdd. Returns null if no recognised format matches.
+    /// </summary>
+    private string? TryNormaliseDateToYyyyMMdd(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+
+        string[] formats = new[]
+        {
+            "yyyyMMdd",       // already correct — 20240115
+            "yyyy-MM-dd",     // ISO 8601   — 2024-01-15
+            "yyyy/MM/dd",     // slash ISO  — 2024/01/15
+            "dd/MM/yyyy",     // UK style   — 15/01/2024
+            "dd-MM-yyyy",     // UK dashes  — 15-01-2024
+            "MM/dd/yyyy",     // US style   — 01/15/2024
+            "dd MMM yyyy",    // verbose    — 15 Jan 2024
+            "dd MMMM yyyy",   // full month — 15 January 2024
+            "d/M/yyyy",       // no-pad UK  — 5/1/2024
+            "d-M-yyyy",       // no-pad dash
+        };
+
+        if (DateTime.TryParseExact(input, formats, CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out DateTime parsed))
+        {
+            return parsed.ToString("yyyyMMdd");
+        }
+
+        // Fallback: let .NET try any recognised format
+        if (DateTime.TryParse(input, CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out DateTime fallback))
+        {
+            return fallback.ToString("yyyyMMdd");
+        }
+
+        return null;
     }
     public CellDataAndStatus ClosureReason(string data)
     {
