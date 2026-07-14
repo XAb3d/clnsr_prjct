@@ -1813,6 +1813,126 @@
 
         return _fromExcelFile;
     }
+
+    // ── Issue #12 ─────────────────────────────────────────────────────────────
+    // Same PersonalID value (NatID, VotersID, DriverLic, PassportNum, SSNum,
+    // EzwichNum, OtherIDNum) mapped to more than one distinct CustomerID.
+    // Flags ALL affected records so the conflict is visible on every row.
+    List<IndividualContext> CheckSamePersonalIDDifferentCustomer(List<IndividualContext> list)
+    {
+        if (list == null) throw new ArgumentNullException(nameof(list));
+
+        // Each entry: (idFieldName, selector) — we check each ID type independently
+        var idSelectors = new List<(string FieldName, Func<IndividualContext, string?> GetValue)>
+        {
+            ("NatIDNum",    r => r.NatIDNum?.Data),
+            ("VotersIDNum", r => r.VotersIDNum?.Data),
+            ("DriverLicNum",r => r.DriverLicNum?.Data),
+            ("PassportNum", r => r.PassportNum?.Data),
+            ("SSNum",       r => r.SSNum?.Data),
+            ("EzwichNum",   r => r.EzwichNum?.Data),
+            ("OtherIDNum",  r => r.OtherIDNum?.Data),
+        };
+
+        foreach (var (fieldName, getValue) in idSelectors)
+        {
+            // Group records by the ID value, excluding blank values
+            var groups = list
+                .Where(r => !string.IsNullOrWhiteSpace(getValue(r)))
+                .GroupBy(r => getValue(r)!.Trim().ToUpperInvariant());
+
+            foreach (var grp in groups)
+            {
+                // Count how many distinct normalised CustomerIDs share this ID value
+                var distinctCustomers = grp
+                    .Where(r => !string.IsNullOrWhiteSpace(r.CustomerID?.Data))
+                    .Select(r => NormalizeCustomerId(r.CustomerID!.Data))
+                    .Distinct()
+                    .Count();
+
+                if (distinctCustomers > 1)
+                {
+                    foreach (var rec in grp)
+                        rec.SamePersonalIDDifferentCustomer = $"E:{fieldName}";
+                }
+            }
+        }
+
+        return list;
+    }
+
+    // ── Issue #14 ─────────────────────────────────────────────────────────────
+    // Same CustomerID linked to more than one distinct name cluster across records.
+    // Name cluster = normalised Surname + FirstName (trimmed, uppercased).
+    List<IndividualContext> CheckSameCustomerIDDifferentName(List<IndividualContext> list)
+    {
+        if (list == null) throw new ArgumentNullException(nameof(list));
+
+        var groups = list
+            .Where(r => !string.IsNullOrWhiteSpace(r.CustomerID?.Data))
+            .GroupBy(r => NormalizeCustomerId(r.CustomerID!.Data));
+
+        foreach (var grp in groups)
+        {
+            var distinctNames = grp
+                .Select(r => (
+                    Surname:    (r.Surname?.Data    ?? string.Empty).Trim().ToUpperInvariant(),
+                    FirstName:  (r.FirstName?.Data  ?? string.Empty).Trim().ToUpperInvariant()
+                ))
+                .Where(n => !string.IsNullOrWhiteSpace(n.Surname) || !string.IsNullOrWhiteSpace(n.FirstName))
+                .Distinct()
+                .Count();
+
+            if (distinctNames > 1)
+            {
+                foreach (var rec in grp)
+                    rec.SameCustomerIDDifferentName = "E";
+            }
+        }
+
+        return list;
+    }
+
+    // ── Issue #2 (exact name match) ───────────────────────────────────────────
+    // Records that share the same AccNum + CustomerID (normalised) but have
+    // different name clusters — flags name discrepancy for review.
+    // Overdraft facilities (CreditFacilityType = "V") are excluded because
+    // the same overdraft legitimately appears with varying disbursement dates
+    // and this check is about name consistency, not disbursement duplication.
+    List<IndividualContext> CheckDuplicateNameMismatch(List<IndividualContext> list)
+    {
+        if (list == null) throw new ArgumentNullException(nameof(list));
+
+        var groups = list
+            .Where(r =>
+                !string.IsNullOrWhiteSpace(r.CreditFacilityAccNum?.Data) &&
+                !string.IsNullOrWhiteSpace(r.CustomerID?.Data))
+            .GroupBy(r => (
+                AccNum:     NormalizeAccountNumber(r.CreditFacilityAccNum!.Data),
+                CustomerID: NormalizeCustomerId(r.CustomerID!.Data)
+            ));
+
+        foreach (var grp in groups)
+        {
+            var distinctNames = grp
+                .Select(r => (
+                    Surname:   (r.Surname?.Data   ?? string.Empty).Trim().ToUpperInvariant(),
+                    FirstName: (r.FirstName?.Data ?? string.Empty).Trim().ToUpperInvariant()
+                ))
+                .Where(n => !string.IsNullOrWhiteSpace(n.Surname) || !string.IsNullOrWhiteSpace(n.FirstName))
+                .Distinct()
+                .Count();
+
+            if (distinctNames > 1)
+            {
+                foreach (var rec in grp)
+                    rec.DuplicateNameMismatch = "E";
+            }
+        }
+
+        return list;
+    }
+
     string NormalizeDate(string dob)
     {
         if (string.IsNullOrWhiteSpace(dob))
@@ -1951,8 +2071,12 @@
                 // Define a composite key based on CreditFacilityAccNum, CustomerID, and DisbursementDate
                 var key = (NormalizeAccountNumber(record.CreditFacilityAccNum?.Data), NormalizeCustomerId(record.CustomerID?.Data), record.DisbursementDate?.Data);
 
+                // Overdraft facilities (CreditFacilityType = "V") legitimately appear multiple times
+                // with different disbursement dates — exempt them from the disbursement-date duplicate rule.
+                bool isOverdraft = (record.CreditFacilityType?.Data ?? string.Empty).Trim().ToUpperInvariant() == "V";
+
                 // Check for duplicates: same key and no prior duplicate DOB issue flagged
-                if (seenKeys.Contains(key) && string.IsNullOrWhiteSpace(record.DuplicateDoBIssues))
+                if (seenKeys.Contains(key) && string.IsNullOrWhiteSpace(record.DuplicateDoBIssues) && !isOverdraft)
                 {
                     duplicatesList.Add(record); // Store duplicates separately
                 }
@@ -2163,6 +2287,9 @@
                         isSubscriber_X_or_Y = await DataManagementService.GetSubscribeX_or_Y(filename);
                         var (mainMatcherTransformer, _duplicatesInd, _correctDateOfBirth, _dobIssues, _matchdata, _newdata, _duplicateCount) = REF_MainMatcherTransformerInd_Clean_IND(RefData, ExcelDataRecieved);
                         var mainMatcherTransformer_temp = DuplicateUser_CustomerIDAndDateOfBirth(mainMatcherTransformer);
+                        mainMatcherTransformer_temp = CheckSamePersonalIDDifferentCustomer(mainMatcherTransformer_temp);
+                        mainMatcherTransformer_temp = CheckSameCustomerIDDifferentName(mainMatcherTransformer_temp);
+                        mainMatcherTransformer_temp = CheckDuplicateNameMismatch(mainMatcherTransformer_temp);
                         mainMatcherTransformer = mainMatcherTransformer_temp;
                         correctDateOfBirth = _correctDateOfBirth;
                         dobIssues = _dobIssues;
@@ -5523,6 +5650,34 @@
             {
                 ic.DisbursementDate.Passed = false;
                 ic.DisbursementDate.Errors = new List<string>() { "DUPLICATE WITH SAME OR DIFFERENT DATE OF DISBURSEMENTDATE" };
+            }
+
+            // ── Sprint 3 cross-record error consumption ───────────────────────
+            // #12 — Same PersonalID value linked to different CustomerIDs
+            if (!string.IsNullOrWhiteSpace(ic.SamePersonalIDDifferentCustomer))
+            {
+                string idField = ic.SamePersonalIDDifferentCustomer.Contains(":") ?
+                    ic.SamePersonalIDDifferentCustomer.Split(':')[1] : "PERSONAL ID";
+                AddCellError(ic.CustomerID,
+                    $"CROSS-RECORD CONFLICT: {idField} VALUE IS LINKED TO MORE THAN ONE CUSTOMER ID");
+            }
+
+            // #14 — Same CustomerID linked to different names
+            if (!string.IsNullOrWhiteSpace(ic.SameCustomerIDDifferentName))
+            {
+                AddCellError(ic.CustomerID,
+                    "CROSS-RECORD CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT NAMES ACROSS RECORDS");
+                AddCellError(ic.Surname,
+                    "CROSS-RECORD CONFLICT: NAME DOES NOT MATCH OTHER RECORDS WITH THE SAME CUSTOMER ID");
+            }
+
+            // #2 — Duplicate AccNum+CustomerID pair with different names (exact name mismatch)
+            if (!string.IsNullOrWhiteSpace(ic.DuplicateNameMismatch))
+            {
+                AddCellError(ic.Surname,
+                    "CROSS-RECORD CONFLICT: DUPLICATE RECORD HAS A DIFFERENT NAME — REVIEW REQUIRED");
+                AddCellError(ic.FirstName,
+                    "CROSS-RECORD CONFLICT: DUPLICATE RECORD HAS A DIFFERENT NAME — REVIEW REQUIRED");
             }
 
             NormalizeAccountAndCustomerFields(ic.CreditFacilityAccNum, ic.CustomerID, "CREDITFACILITYACCNUM");

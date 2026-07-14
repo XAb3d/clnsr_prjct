@@ -7,6 +7,13 @@ public class IndividualContext
     public string DuplicateDoBIssues { get; set; }
     public string CusumerIDDateOfBirth { get; set; } =string.Empty;
     public string DisburStatus { get; set; }
+    // ── Sprint 3 cross-record flags ───────────────────────────────────────────
+    /// <summary>Set to "E" when the same PersonalID value maps to more than one distinct CustomerID.</summary>
+    public string SamePersonalIDDifferentCustomer { get; set; } = string.Empty;
+    /// <summary>Set to "E" when the same CustomerID maps to more than one distinct name cluster.</summary>
+    public string SameCustomerIDDifferentName { get; set; } = string.Empty;
+    /// <summary>Set to "E" when a non-overdraft duplicate name mismatch is detected.</summary>
+    public string DuplicateNameMismatch { get; set; } = string.Empty;
     public string UNL_NDIA_OldData { get; set; } = string.Empty;
     public string UNL_natidnum { get; set; } = string.Empty;
     public string UNL_votersidnum { get; set; } = string.Empty;
