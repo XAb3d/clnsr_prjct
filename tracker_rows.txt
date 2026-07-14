@@ -20,3 +20,27 @@ Example: 28 days returns “0” instead of “1”.|Apply round-up logic when c
 13|Individual|Duplicate Records with Different Names Not Correctly Handled|Multiple records for the same facility/customer combination have differing names and CustomerID formats; the cleanser does not consolidate or flag these.|Where AccNum, normalised CustomerID, DOB and DisbursementDate all match, treat records as duplicates, retain one, and flag name discrepancies for review.|Open|
 14|Individual|Overdraft Facilities Incorrectly Flagged as Unloadable|Overdraft facilities are flagged unloadable when the same overdraft appears twice with different disbursement dates, even though this is valid.|Exempt overdraft records from the disbursement-date duplication rule; only flag them unloadable based on other applicable rules.|Open|
 15|Individual|Country Codes Not Consistently Converted to Full Forms|Country code conversion to full nationality names is applied inconsistently; only some codes are converted.|Apply country code-to-full-name conversion to all nationality fields without exception.|Open|
+
+── SPRINT 1 CLOSURE NOTES ──────────────────────────────────────────────
+Date: 2026-07-14
+
+Issue #3  — CustomerID Leading Zeros
+Status: CLOSED — Already fixed prior to sprint.
+Evidence: NormalizeCustomerId() in Home.razor line 1831 calls TrimStart('0')
+on all-numeric IDs. Edge case (all zeros) correctly returns "0".
+
+Issue #9  — Exponentiated Account Number (no error message)
+Status: CLOSED — Already fixed prior to sprint.
+Evidence: LooksLikeExponentNotation() called in NormalizeAccountAndCustomerFields()
+line 1895. Error "INVALID ACCOUNT NUMBER - EXPONENTIATED VALUE DETECTED" added via AddCellError().
+
+Issue #10 — Spaces in Account Number Cause Unloadable Flag
+Status: CLOSED — Already fixed prior to sprint.
+Evidence: HasInternalWhitespace() check in NormalizeAccountAndCustomerFields().
+Spaces are stripped via NormalizeAccountNumber() before comparison. No error flagged.
+
+Issue #11 / #13 — FacilityAccNum and CustomerID Are Identical
+Status: CLOSED — Already fixed prior to sprint.
+Evidence: Explicit check at Home.razor line 1927 compares
+NormalizeAccountNumber(account.Data) == NormalizeCustomerId(customer.Data)
+and calls AddCellError() on both fields with clear messages.
