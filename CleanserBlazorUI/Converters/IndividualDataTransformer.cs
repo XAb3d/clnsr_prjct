@@ -231,70 +231,140 @@ public class IndividualDataTransformer
     {
         var cellData = new CellDataAndStatus(data);
         data = stringHelper.RemoveSystemErroNames(data);
-        Dictionary<string, string> currencyCodes = new Dictionary<string, string>
-        {
-           {"USA", "AMERICAN"},
-           {"EUR", "EUROZONE (MULTIPLE NATIONALITIES)"},
-           {"GBR", "BRITISH"},
-           {"JPN", "JAPANESE"},
-           {"CHN", "CHINESE"},
-           {"IND", "INDIAN"},
-           {"IN", "INDIAN"},
-           {"AUS", "AUSTRALIAN"},
-           {"CAN", "CANADIAN"},
-           {"CHE", "SWISS"},
-           {"NZL", "NEW ZEALANDER"},
-           {"NGA", "NIGERIAN"},
-           {"ZAF", "SOUTH AFRICAN"},
-           {"KEN", "KENYAN"},
-           {"EGY", "EGYPTIAN"},
-           {"ETH", "ETHIOPIAN"},
-           {"GHA", "GHANAIAN"},
-           {"GHANA", "GHANAIAN"},
-           {"GHS", "GHANAIAN"},
-           {"GH", "GHANAIAN"},
-           {"XOF", "WEST AFRICAN (MULTIPLE NATIONALITIES)"},
-           {"TZA", "TANZANIAN"},
-           {"UGA", "UGANDAN"},
-           {"MAR", "MOROCCAN"},
-           {"KOR", "SOUTH KOREAN"},
-           {"ARE", "EMIRATI"},
-           {"TUR", "TURKISH"},
-           {"SGP", "SINGAPOREAN"},
-           {"NIG", "NIGERIAN"},
-           {"NG", "NIGERIAN"},
-           {"CIV", "IVORIAN"},
-           {"PE", "PERUVIAN"},
-           {"PER", "PERUVIAN"},
-           {"TT", "TRINIDADIANS"},
-           {"TTO", "TRINIDADIANS"},
-           {"LK", "SRILANKAN"},
-           {"LKA", "SRILANKAN"},
-           {"SL", "SIERRALEONEAN"},
-           {"SLA", "SIERRALEONEAN"},
-           {"BJ", "BENINOIS"},
-           {"BEN", "BENINOIS"},
-           {"CN", "CHINESE"},
-           {"CI", "IVORIAN"},
-           {"GNQ", "EQUATOGUINEAN" },
-           {"GQ", "EQUATOGUINEAN" },
-           {"GAB", "GABONESE" },
-           {"GA", "GABONESE" },
-           {"SN", "SENEGALESE" },
-           {"SEN", "SENEGALESE" },
-           {"TOG", "TOGOLESE"},
-           {"FRA", "FRENCH"}};
+        // Normalise input before lookup — handles mixed case (e.g. "gha", "Ghana", "GHA" all resolve correctly)
+        string normalisedInput = data.Trim().ToUpperInvariant();
 
-
-        // Check if the code exists in the dictionary
-        if (currencyCodes.ContainsKey(data))
+        // Keys are always uppercase ISO codes OR common full-name variants subscribers send
+        Dictionary<string, string> nationalityCodes = new Dictionary<string, string>
         {
-            cellData.Data = currencyCodes[data];
+            // ── Americas ──────────────────────────────────────────────────
+            {"USA",         "AMERICAN"},
+            {"US",          "AMERICAN"},
+            {"AMERICAN",    "AMERICAN"},
+            {"CAN",         "CANADIAN"},
+            {"CA",          "CANADIAN"},
+            {"CANADIAN",    "CANADIAN"},
+            {"PE",          "PERUVIAN"},
+            {"PER",         "PERUVIAN"},
+            {"PERUVIAN",    "PERUVIAN"},
+            {"TT",          "TRINIDADIAN"},
+            {"TTO",         "TRINIDADIAN"},
+            {"TRINIDADIAN", "TRINIDADIAN"},
+            // ── Europe ────────────────────────────────────────────────────
+            {"EUR",         "EUROPEAN"},
+            {"GBR",         "BRITISH"},
+            {"GB",          "BRITISH"},
+            {"UK",          "BRITISH"},
+            {"BRITISH",     "BRITISH"},
+            {"FRA",         "FRENCH"},
+            {"FR",          "FRENCH"},
+            {"FRENCH",      "FRENCH"},
+            {"CHE",         "SWISS"},
+            {"CH",          "SWISS"},
+            {"SWISS",       "SWISS"},
+            {"TUR",         "TURKISH"},
+            {"TR",          "TURKISH"},
+            {"TURKISH",     "TURKISH"},
+            // ── Asia & Pacific ────────────────────────────────────────────
+            {"JPN",         "JAPANESE"},
+            {"JP",          "JAPANESE"},
+            {"JAPANESE",    "JAPANESE"},
+            {"CHN",         "CHINESE"},
+            {"CN",          "CHINESE"},
+            {"CHINESE",     "CHINESE"},
+            {"IND",         "INDIAN"},
+            {"IN",          "INDIAN"},
+            {"INDIAN",      "INDIAN"},
+            {"AUS",         "AUSTRALIAN"},
+            {"AU",          "AUSTRALIAN"},
+            {"AUSTRALIAN",  "AUSTRALIAN"},
+            {"NZL",         "NEW ZEALANDER"},
+            {"NZ",          "NEW ZEALANDER"},
+            {"SGP",         "SINGAPOREAN"},
+            {"SG",          "SINGAPOREAN"},
+            {"SINGAPOREAN", "SINGAPOREAN"},
+            {"KOR",         "SOUTH KOREAN"},
+            {"KR",          "SOUTH KOREAN"},
+            {"LK",          "SRI LANKAN"},
+            {"LKA",         "SRI LANKAN"},
+            {"SRILANKAN",   "SRI LANKAN"},
+            {"SRI LANKAN",  "SRI LANKAN"},
+            // ── Middle East ───────────────────────────────────────────────
+            {"ARE",         "EMIRATI"},
+            {"AE",          "EMIRATI"},
+            {"EMIRATI",     "EMIRATI"},
+            // ── West Africa ───────────────────────────────────────────────
+            {"GHA",         "GHANAIAN"},
+            {"GH",          "GHANAIAN"},
+            {"GHANA",       "GHANAIAN"},
+            {"GHS",         "GHANAIAN"},
+            {"GHANAIAN",    "GHANAIAN"},
+            {"NGA",         "NIGERIAN"},
+            {"NIG",         "NIGERIAN"},
+            {"NG",          "NIGERIAN"},
+            {"NIGERIA",     "NIGERIAN"},
+            {"NIGERIAN",    "NIGERIAN"},
+            {"CIV",         "IVORIAN"},
+            {"CI",          "IVORIAN"},
+            {"IVORIAN",     "IVORIAN"},
+            {"BJ",          "BENINOIS"},
+            {"BEN",         "BENINOIS"},
+            {"BENIN",       "BENINOIS"},
+            {"BENINOIS",    "BENINOIS"},
+            {"SN",          "SENEGALESE"},
+            {"SEN",         "SENEGALESE"},
+            {"SENEGAL",     "SENEGALESE"},
+            {"SENEGALESE",  "SENEGALESE"},
+            {"TOG",         "TOGOLESE"},
+            {"TG",          "TOGOLESE"},
+            {"TOGO",        "TOGOLESE"},
+            {"TOGOLESE",    "TOGOLESE"},
+            {"GNQ",         "EQUATOGUINEAN"},
+            {"GQ",          "EQUATOGUINEAN"},
+            {"GAB",         "GABONESE"},
+            {"GA",          "GABONESE"},
+            {"GABONESE",    "GABONESE"},
+            {"SL",          "SIERRA LEONEAN"},
+            {"SLA",         "SIERRA LEONEAN"},
+            {"SLE",         "SIERRA LEONEAN"},
+            {"SIERRALEONEAN","SIERRA LEONEAN"},
+            {"SIERRA LEONEAN","SIERRA LEONEAN"},
+            {"XOF",         "WEST AFRICAN"},
+            // ── East & Southern Africa ────────────────────────────────────
+            {"KEN",         "KENYAN"},
+            {"KE",          "KENYAN"},
+            {"KENYAN",      "KENYAN"},
+            {"TZA",         "TANZANIAN"},
+            {"TZ",          "TANZANIAN"},
+            {"TANZANIAN",   "TANZANIAN"},
+            {"UGA",         "UGANDAN"},
+            {"UG",          "UGANDAN"},
+            {"UGANDAN",     "UGANDAN"},
+            {"ZAF",         "SOUTH AFRICAN"},
+            {"ZA",          "SOUTH AFRICAN"},
+            {"SOUTH AFRICAN","SOUTH AFRICAN"},
+            // ── North Africa ──────────────────────────────────────────────
+            {"EGY",         "EGYPTIAN"},
+            {"EG",          "EGYPTIAN"},
+            {"EGYPTIAN",    "EGYPTIAN"},
+            {"MAR",         "MOROCCAN"},
+            {"MA",          "MOROCCAN"},
+            {"MOROCCAN",    "MOROCCAN"},
+            {"ETH",         "ETHIOPIAN"},
+            {"ET",          "ETHIOPIAN"},
+            {"ETHIOPIAN",   "ETHIOPIAN"},
+        };
+
+        // Check if normalised input resolves in the dictionary
+        if (nationalityCodes.ContainsKey(normalisedInput))
+        {
+            cellData.Data = nationalityCodes[normalisedInput];
             return cellData;
         }
         else
         {
-            cellData.Data = data;
+            // Pass through as-is — unknown codes are preserved, not wiped
+            cellData.Data = data.Trim();
             return cellData;
         }
     }
@@ -854,13 +924,13 @@ public class IndividualDataTransformer
             string unit = match.Groups[2].Value;
 
             // Determine the conversion factor based on the unit
-            if (unit.StartsWith("d")) // Days to months
+            if (unit.StartsWith("d")) // Days to months — round up so e.g. 28 days = 1 month, not 0
             {
-                cellData.Data = ((int)(value / 30.44)).ToString();
+                cellData.Data = ((int)Math.Ceiling(value / 30.44)).ToString();
             }
-            else if (unit.StartsWith("w")) // Weeks to months
+            else if (unit.StartsWith("w")) // Weeks to months — round up so partial months count as 1
             {
-                cellData.Data = ((int)((value * 7) / 30.44)).ToString();
+                cellData.Data = ((int)Math.Ceiling((value * 7) / 30.44)).ToString();
             }
             else if (unit.StartsWith("m")) // Already in months
             {

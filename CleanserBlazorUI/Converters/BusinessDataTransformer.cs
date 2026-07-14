@@ -582,13 +582,13 @@ public class BusinessDataTransformer
             string unit = match.Groups[2].Value;
 
             // Determine the conversion factor based on the unit
-            if (unit.StartsWith("d")) // Days to months
+            if (unit.StartsWith("d")) // Days to months — round up so e.g. 28 days = 1 month, not 0
             {
-                cellData.Data = ((int)(value / 30.44)).ToString();
+                cellData.Data = ((int)Math.Ceiling(value / 30.44)).ToString();
             }
-            else if (unit.StartsWith("w")) // Weeks to months
+            else if (unit.StartsWith("w")) // Weeks to months — round up so partial months count as 1
             {
-                cellData.Data = ((int)((value * 7) / 30.44)).ToString();
+                cellData.Data = ((int)Math.Ceiling((value * 7) / 30.44)).ToString();
             }
             else if (unit.StartsWith("m")) // Already in months
             {
