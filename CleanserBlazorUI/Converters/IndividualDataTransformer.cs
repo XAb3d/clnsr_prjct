@@ -1489,18 +1489,67 @@ public class IndividualDataTransformer
     {
         var cellData = new CellDataAndStatus(data);
         data = stringHelper.RemoveSystemErroNames(data);
-        var date = stringHelper.CheckDate(data);
-        if (date.IsValidFormat)
-        {
-            cellData.Data = data;
-            return cellData;
-        }
-        else
-        {
 
+        if (string.IsNullOrWhiteSpace(data))
+        {
             cellData.Data = string.Empty;
             return cellData;
         }
+
+        // Attempt to normalise common subscriber date formats into yyyyMMdd
+        // before passing to CheckDate(), which only accepts yyyyMMdd.
+        // Formats handled: yyyy-MM-dd, dd/MM/yyyy, dd-MM-yyyy, MM/dd/yyyy,
+        //                  yyyyMMdd (already correct), dd MMM yyyy, etc.
+        string normalised = TryNormaliseDateToYyyyMMdd(data.Trim()) ?? data.Trim();
+
+        var date = stringHelper.CheckDate(normalised);
+        if (date.IsValidFormat)
+        {
+            cellData.Data = normalised; // always store in yyyyMMdd
+            return cellData;
+        }
+
+        // Not a recognisable date — preserve original value rather than silently wiping
+        cellData.Data = data.Trim();
+        return cellData;
+    }
+
+    /// <summary>
+    /// Attempts to parse a date string in various common formats and return it
+    /// as yyyyMMdd. Returns null if no recognised format matches.
+    /// </summary>
+    private string? TryNormaliseDateToYyyyMMdd(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+
+        string[] formats = new[]
+        {
+            "yyyyMMdd",       // already correct — 20240115
+            "yyyy-MM-dd",     // ISO 8601   — 2024-01-15
+            "yyyy/MM/dd",     // slash ISO  — 2024/01/15
+            "dd/MM/yyyy",     // UK style   — 15/01/2024
+            "dd-MM-yyyy",     // UK dashes  — 15-01-2024
+            "MM/dd/yyyy",     // US style   — 01/15/2024
+            "dd MMM yyyy",    // verbose    — 15 Jan 2024
+            "dd MMMM yyyy",   // full month — 15 January 2024
+            "d/M/yyyy",       // no-pad UK  — 5/1/2024
+            "d-M-yyyy",       // no-pad dash
+        };
+
+        if (DateTime.TryParseExact(input, formats, CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out DateTime parsed))
+        {
+            return parsed.ToString("yyyyMMdd");
+        }
+
+        // Fallback: let .NET try any recognised format
+        if (DateTime.TryParse(input, CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out DateTime fallback))
+        {
+            return fallback.ToString("yyyyMMdd");
+        }
+
+        return null;
     }
     public CellDataAndStatus ClosureReason(string data)
     {
