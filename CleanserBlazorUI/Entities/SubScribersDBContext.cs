@@ -363,6 +363,7 @@ public class BusinessRef
     public string DateOfBirth { get; set; } = string.Empty;
     public string? DisbursementDate { get; set; } = string.Empty;
     public DateTime CreatedDate { get; set; }
+    public DateTime LastUpdatedDate { get; set; }
 }
 public class IndividualRef
 {
@@ -374,6 +375,15 @@ public class IndividualRef
     public string? DateOfBirth { get; set; } = string.Empty;
     public string? DisbursementDate { get; set; } = string.Empty;
     public DateTime CreatedDate { get; set; }
+    public DateTime LastUpdatedDate { get; set; }
+    // ── Sprint 5: Personal ID fields for cross-month enrichment tracking ──
+    public string? NatIDNum     { get; set; } = string.Empty;
+    public string? VotersIDNum  { get; set; } = string.Empty;
+    public string? DriverLicNum { get; set; } = string.Empty;
+    public string? PassportNum  { get; set; } = string.Empty;
+    public string? SSNum        { get; set; } = string.Empty;
+    public string? EzwichNum    { get; set; } = string.Empty;
+    public string? OtherIDNum   { get; set; } = string.Empty;
 }
 //public class BusinessRef
 //{
