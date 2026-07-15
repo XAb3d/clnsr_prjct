@@ -209,7 +209,7 @@ public class DataManagementService
             Facilityaccnum   = r.Facilityaccnum?.Data   ?? string.Empty,
             CustomerID       = r.CustomerID?.Data       ?? string.Empty,
             DisbursementDate = r.DisbursementDate?.Data ?? string.Empty,
-            DateOfBirth      = r.DateOfBirth?.Data      ?? string.Empty,
+            DateOfBirth      = r.DateOfBirth            ?? string.Empty,
         });
         await SaveExcelDataToDatabaseBus(mapped, fileShortName);
     }
