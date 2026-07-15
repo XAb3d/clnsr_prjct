@@ -66,17 +66,31 @@ public class DataManagementService
 
             if (existingIndex.TryGetValue(key, out var dbRow))
             {
+                // EF Core entity properties can't be passed as ref directly.
+                // Copy to locals, enrich, write back.
+                string? natID = dbRow.NatIDNum, votersID = dbRow.VotersIDNum,
+                        driverLic = dbRow.DriverLicNum, passport = dbRow.PassportNum,
+                        ssNum = dbRow.SSNum, ezwich = dbRow.EzwichNum, otherID = dbRow.OtherIDNum;
+
                 bool changed = false;
-                changed |= EnrichField(ref dbRow.NatIDNum,     item.NatIDNum,     "NatIDNum",     key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.VotersIDNum,  item.VotersIDNum,  "VotersIDNum",  key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.DriverLicNum, item.DriverLicNum, "DriverLicNum", key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.PassportNum,  item.PassportNum,  "PassportNum",  key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.SSNum,        item.SSNum,        "SSNum",        key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.EzwichNum,    item.EzwichNum,    "EzwichNum",    key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.OtherIDNum,   item.OtherIDNum,   "OtherIDNum",   key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref natID,     item.NatIDNum,     "NatIDNum",     key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref votersID,  item.VotersIDNum,  "VotersIDNum",  key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref driverLic, item.DriverLicNum, "DriverLicNum", key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref passport,  item.PassportNum,  "PassportNum",  key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref ssNum,     item.SSNum,        "SSNum",        key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref ezwich,    item.EzwichNum,    "EzwichNum",    key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref otherID,   item.OtherIDNum,   "OtherIDNum",   key.Item1, key.Item2, key.Item3, changelog);
+
+                if (changed)
+                {
+                    dbRow.NatIDNum = natID; dbRow.VotersIDNum = votersID;
+                    dbRow.DriverLicNum = driverLic; dbRow.PassportNum = passport;
+                    dbRow.SSNum = ssNum; dbRow.EzwichNum = ezwich; dbRow.OtherIDNum = otherID;
+                    dbRow.LastUpdatedDate = now;
+                    toUpdate.Add(dbRow);
+                }
                 if (!string.IsNullOrWhiteSpace(item.DateOfBirth))
                     dbRow.DateOfBirth = item.DateOfBirth;
-                if (changed) { dbRow.LastUpdatedDate = now; toUpdate.Add(dbRow); }
             }
             else
             {
@@ -133,7 +147,7 @@ public class DataManagementService
     }
 
     // ── BUS Upsert ────────────────────────────────────────────────────────────
-    public async Task SaveExcelDataToDatabaseBus(IEnumerable<BusinessContext> dataFromExcel, string fileShortName)
+    public async Task SaveExcelDataToDatabaseBus(IEnumerable<DBBusinessContext> dataFromExcel, string fileShortName)
     {
         var subscriber = await GetFileShortCodeFromFileName(fileShortName);
         var now        = DateTime.Now;
@@ -152,14 +166,14 @@ public class DataManagementService
 
         foreach (var item in dataFromExcel)
         {
-            var key = (Norm(item.Facilityaccnum?.Data),
-                       Norm(item.CustomerID?.Data),
-                       Norm(item.DisbursementDate?.Data));
+            var key = (Norm(item.Facilityaccnum),
+                       Norm(item.CustomerID),
+                       Norm(item.DisbursementDate));
 
             if (existingIndex.TryGetValue(key, out var dbRow))
             {
-                if (!string.IsNullOrWhiteSpace(item.DateOfBirth?.Data))
-                    dbRow.DateOfBirth = item.DateOfBirth.Data;
+                if (!string.IsNullOrWhiteSpace(item.DateOfBirth))
+                    dbRow.DateOfBirth = item.DateOfBirth;
                 dbRow.LastUpdatedDate = now;
                 toUpdate.Add(dbRow);
             }
@@ -168,10 +182,10 @@ public class DataManagementService
                 toInsert.Add(new BusinessRef
                 {
                     SubscriberCode       = subscriber,
-                    CreditFacilityAccNum = item.Facilityaccnum?.Data  ?? string.Empty,
-                    CustomerID           = item.CustomerID?.Data       ?? string.Empty,
-                    DisbursementDate     = item.DisbursementDate?.Data ?? string.Empty,
-                    DateOfBirth          = item.DateOfBirth?.Data      ?? string.Empty,
+                    CreditFacilityAccNum = item.Facilityaccnum  ?? string.Empty,
+                    CustomerID           = item.CustomerID       ?? string.Empty,
+                    DisbursementDate     = item.DisbursementDate ?? string.Empty,
+                    DateOfBirth          = item.DateOfBirth      ?? string.Empty,
                     CurrenVersion        = 1,
                     CreatedDate          = now,
                     LastUpdatedDate      = now
@@ -184,6 +198,20 @@ public class DataManagementService
             await BulkInsertBatchBUS(toInsert.Skip(i).Take(batchSize).ToList());
         if (toUpdate.Count > 0)
             await _context.BulkUpdateAsync(toUpdate, new BulkConfig { BatchSize = 4000 });
+    }
+
+
+    // ── BUS overload for CLEAN path — accepts BusinessContext (has .Data properties) ─
+    public async Task SaveExcelDataToDatabaseBus(IEnumerable<BusinessContext> dataFromExcel, string fileShortName)
+    {
+        var mapped = dataFromExcel.Select(r => new DBBusinessContext
+        {
+            Facilityaccnum   = r.Facilityaccnum?.Data   ?? string.Empty,
+            CustomerID       = r.CustomerID?.Data       ?? string.Empty,
+            DisbursementDate = r.DisbursementDate?.Data ?? string.Empty,
+            DateOfBirth      = r.DateOfBirth?.Data      ?? string.Empty,
+        });
+        await SaveExcelDataToDatabaseBus(mapped, fileShortName);
     }
 
     private bool EnrichField(
