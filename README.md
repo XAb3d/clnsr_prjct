@@ -106,14 +106,32 @@ All known issues, severity ratings, priority levels, and resolution status are m
 ## Getting Started
 
 ```bash
-# Restore dependencies
+# 1. Clone
+git clone https://github.com/XAb3d/clnsr_prjct.git
+cd clnsr_prjct
+
+# 2. Restore dependencies
 dotnet restore
 
-# Run locally
-dotnet run --project CleanserBlazorUI
+# 3. Configure your connection string
+#    Copy the template and fill in your SQL Server details
+cp CleanserBlazorUI/appsettings.template.json CleanserBlazorUI/appsettings.json
+#    Then edit CleanserBlazorUI/appsettings.json — set Server, Database, credentials
+
+# 4. Apply database migrations (from repo root)
+dotnet ef database update --project CleanserBlazorUI/CleanserBlazorUI.csproj
+
+# 5. Run
+dotnet run --project CleanserBlazorUI/CleanserBlazorUI.csproj
 ```
 
-Requires a SQL Server connection string in `appsettings.json` for reference data persistence.
+> **Note:** `appsettings.json` is excluded from Git (contains your connection string).  
+> Always use `appsettings.template.json` as the starting point on a new machine.
+
+Requires SQL Server and .NET 9 SDK. If `dotnet ef` is not installed:
+```bash
+dotnet tool install --global dotnet-ef
+```
 
 ---
 
