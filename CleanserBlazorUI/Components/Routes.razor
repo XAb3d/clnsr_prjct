@@ -1,0 +1,16 @@
+﻿@using CleanserBlazorUI.Components.Account.Shared
+<Router AppAssembly="typeof(Program).Assembly">
+    <Found Context="routeData">
+        <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+            <Authorizing>
+                <p>Authorizing...</p>
+            </Authorizing>
+            <NotAuthorized>
+                <p>You're not authorized to access this page.</p>
+            </NotAuthorized>
+        </AuthorizeRouteView>
+    </Found>
+    <NotFound>
+        <p>Sorry, there's nothing at this address.</p>
+    </NotFound>
+</Router>

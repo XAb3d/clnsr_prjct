@@ -1,0 +1,22 @@
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "server=.;Persist Security Info=True;User ID=sa;Password=P@ssw0rd;Multiple Active Result Sets=False;Database=NewCleaserDB;Encrypt=True;Trust Server Certificate=True;Command Timeout=0",
+    "SubscriberConnection": "server=.;Persist Security Info=True;User ID=sa;Password=P@ssw0rd;Multiple Active Result Sets=False;Database=blazor-CleanserAppDB;Encrypt=True;Trust Server Certificate=True;Command Timeout=0"
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "SmtpSettings": {
+    "Server": "smtp.titan.email",
+    "Port": 25,
+    "Username": "noreply.example@email.com",
+    "Password": "P@ssw0rd",
+    "EnableSsl": true,
+    "FromEmail": "noreply.example@email.com"
+  },
+  "AllowedHosts": "*"
+}
+//rename "example.appsettings.json" to  "appsettings.json"

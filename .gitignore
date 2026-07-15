@@ -56,3 +56,14 @@ coverage/
 
 # CleanserBlazorUI connection string — do NOT commit; copy from appsettings.template.json
 CleanserBlazorUI/appsettings.json
+
+# ── Logs ──────────────────────────────────────────────
+CleanserBlazorUI/logs/
+
+# ── Temp upload/output files ──────────────────────────
+CleanserBlazorUI/wwwroot/temp/
+
+# ── Dev scratch files ─────────────────────────────────
+CleanserBlazorUI/TextFile.txt
+CleanserBlazorUI/TextFile1.txt
+CleanserBlazorUI/DevelopmentFolder/TextFile.txt

@@ -1,0 +1,1642 @@
+﻿@page "/refdata"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@implements IDisposable
+@inject ISnackbar Snackbar
+@inject DataManagementService DataManagementService
+
+
+@* @attribute [Authorize]
+@* <p>Your email is: @authState.User.FindFirst(System.Security.Claims.ClaimTypes.Email).Value</p>  *@
+@*@attribute [Authorize(Policy = "PasswordChanged")] *@
+
+<style>
+    .timer-container {
+    text-align: center;
+    margin: 20px;
+    /* padding: 20px; */
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    }
+
+    .timer-controls {
+    margin-top: 15px;
+    }
+
+    .btn {
+    margin: 0 5px;
+    padding: 8px 16px;
+    }
+</style>
+<div Width="100%" Style="background-color:#000000;min-height:100%;overflow: hidden;">
+
+    <div style="width:100%;">
+        <MudAlert Class="@AlertSeverityVisible" Severity="@AlertSeverity">@AlertSeverityMessage</MudAlert>
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Buffer="true" Class="@progressIsVisible" Style="margin-top: 10px; margin-bottom: 0px;" />
+        <MudExpansionPanels Dense="false">
+            @foreach (var item in TopExpandPanelsContent!)
+            {
+                <MudExpansionPanel Text="@item.Title" Expanded="@closePanels" ExpandedChanged="() => REF_OnPanelExpandedChanged(item.IdShortName)" Icon="@Icons.Material.Filled.JoinFull">
+                    <MudStack Style="width: 100%">
+                        <style>
+                            /* Dark theme styles */
+                            .dropzone {
+                            width: 100%;
+                            padding: 40px;
+                            border: 2px dashed #4a90e2; /* Blue accent */
+                            background-color: transparent; /* Dark background */
+                            color: #ccc; /* Light text */
+                            text-align: center;
+                            cursor: pointer;
+                            transition: background-color 0.3s ease, border-color 0.3s ease;
+                            position: relative;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            border-radius: 8px;
+                            }
+
+                            .dropzone:hover {
+                            background-color: transparent; /* Slightly lighter on hover */
+                            border-color: #5a9ded;
+                            }
+
+                            .dropzone.dragover {
+                            background-color: #333; /* Subtle highlight */
+                            border-color: #72b4ff; /* Bright blue highlight */
+                            box-shadow: 0 0 10px rgba(114, 180, 255, 0.3);
+                            }
+
+                            /* Hide the file input but keep it functional */
+                            .dropzone input[type="file"] {
+                            position: absolute;
+                            width: 100%;
+                            height: 100%;
+                            opacity: 0;
+                            cursor: pointer;
+                            }
+
+                            /* Uploaded file list */
+                            .file-list {
+                            margin-top: 10px;
+                            padding: 0;
+                            list-style: none;
+                            }
+
+                            .file-list li {
+                            padding: 8px;
+                            background: #292929;
+                            border: 1px solid #444;
+                            border-radius: 4px;
+                            margin-bottom: 5px;
+                            color: #ddd;
+                            }
+                        </style>
+
+                        <div @ref="DropZone" class="dropzone">
+                            <p>Drag & drop Excel files here or <strong>click to select</strong></p>
+                            <InputFile OnChange="REF_FileUpload" multiple accept="@ACCEPTED_FILETYPE" />
+                        </div>
+
+                        @if (isLoading)
+                        {
+                            <p>Uploading...</p>
+                        }
+                        else
+                        {
+                            <ul>
+                                @foreach (var file in spreadsheetFileAndChipColor)
+                                {
+                                    <MudChip T="String" IconColor="Color.Error" Color="file.SpreadsheetFileColor" OnClose="() => REF_RemoveFile(file)">@file.SpreadsheetFile.Name</MudChip>
+                                }
+                            </ul>
+                        }
+                        @if (!string.IsNullOrEmpty(ErrorMessage))
+                        {
+                            <div>@ErrorMessage</div>
+                        }
+                    </MudStack>
+                    <MudDivider Class="mb-3"></MudDivider>
+                    <MudPaper Class="d-flex flex-row" Elevation="0">
+                        <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="REF_ClearSeletedFiles">Reload Cleanser</MudButton>
+                        <MudButton class="@showorHideReferenceButton" Variant="Variant.Text" Color="Color.Success" OnClick="REF_StartReferencing"> Start Referencing</MudButton>
+                        <MudButton class="@showorHideInsertReferenceButton" Variant="Variant.Text" Color="Color.Warning" OnClick="REF_InsertThisAsLatesReference">Insert reference(s)</MudButton>
+                        <MudSpacer></MudSpacer>
+                        <MudButton StartIcon="@Icons.Custom.FileFormats.FileDocument" Variant="Variant.Text" Color="Color.Inherit">RECORDS LOADED: @readCounting</MudButton>
+                        <MudButton StartIcon="@Icons.Custom.FileFormats.FileDocument" Variant="Variant.Text" Color="Color.Inherit">RECORDS PROCESSED: @writeCounting</MudButton>
+                    </MudPaper>
+                </MudExpansionPanel>
+            }
+        </MudExpansionPanels>
+    </div>
+
+
+
+
+
+
+    @*  <>Result from file upload</> *@
+    <div style="width:100%;">
+        <MudPaper Class="p-0 m-0" Elevation="0" MinHeight="300">
+            <MudTabs AlwaysShowScrollButtons="false" Outlined="true" Position="@Position.Top" Rounded="true" Border="true" ApplyEffectsToContainer="true" Class="mt-5" PanelClass="pa-6">
+                @*  <>--------------Failed 1----------------</> *@
+                @if (GetErrorsPairsList.Count > 0)
+                {
+                    <MudTabPanel Text="INVALID HEADERS" BadgeData="@numberOffailedCount" BadgeColor="Color.Error" Class="m-0 p-0">
+                        <MudExpansionPanels>
+                            @if (GetErrorsPairsList != null && GetErrorsPairsList.Any() && REF_GetAllFailedFileLenght() != null && REF_GetAllFailedFileLenght().Count == GetErrorsPairsList.Count)
+                            {
+                                for (int i = 0; i < GetErrorsPairsList.Count; i++)
+                                {
+                                    var errorsGroup = GetErrorsPairsList[i];
+                                    var panelTitle = REF_GetAllFailedFileLenght()[i];
+
+                                    <MudExpansionPanel Text="@panelTitle">
+                                        <MudTable Items="errorsGroup" Bordered="false" Striped="false" Elevation="0">
+                                            <HeaderContent>
+                                                <MudTh>Expected Header</MudTh>
+                                                <MudTh>Uploaded Header</MudTh>
+                                            </HeaderContent>
+                                            <RowTemplate>
+                                                <MudTd>@context.ExpectedHeader</MudTd>
+                                                <MudTd><MudText Color="Color.Error">@context.UploadedHeader</MudText></MudTd>
+                                            </RowTemplate>
+                                        </MudTable>
+                                    </MudExpansionPanel>
+                                }
+                            }
+                            else
+                            {
+                                <MudExpansionPanel Text="No Data">
+                                    <p>No errors to display.</p>
+                                </MudExpansionPanel>
+                            }
+                        </MudExpansionPanels>
+
+                    </MudTabPanel>
+                }
+
+                @*  <>--------------Passed 2----------------</> *@
+                <MudTabPanel Text="">
+                    <MudPaper style="display: flex;flex-direction: column;justify-content: center;">
+                        <MudPaper Elevation="0">
+                            @if (fullPastFilesPaths != null)
+                            {
+                                foreach (var item in fullPastFilesPaths)
+                                {
+                                    <MudPaper Elevation="0" Class="my-2 py-y" Style="background-color: #36363F">
+                                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Custom.FileFormats.FileDocument">@REF_GetFileNameFromFile(item)</MudButton>
+                                        <MudDivider />
+                                    </MudPaper>
+                                }
+                            }
+                        </MudPaper>
+                    </MudPaper>
+                </MudTabPanel>
+            </MudTabs>
+        </MudPaper>
+    </div>
+</div>
+
+@code {
+    private string showorHideInsertReferenceButton = "d-none";
+    private string showorHideReferenceButton = "d-block";
+    //Success: The uploaded spreadsheet contains the expected headers
+    private MudBlazor.Severity AlertSeverity { get; set; } = MudBlazor.Severity.Success;
+    private string AlertSeverityMessage;
+    private System.Timers.Timer _timer;
+    private TimeSpan _elapsedTime = TimeSpan.Zero;
+    private bool _isRunning = false;
+    private int writeCounting = 0;
+    private int readCounting = 0;
+    private ElementReference DropZone;
+    private bool _jsInitialized = false;
+    string expandPanelSelectedOption = string.Empty;
+    public bool PRINT_EXCEL_WITH_SECURED_NAME = false;
+    public string ACCEPTED_FILETYPE = ".xls,.xlsx";
+    public long MAX_FILESIZE = 5L * 1024L * 1024L * 1024L;
+    public int MAX_FILES = 500;
+    public int FILE_NAME_LENGHT = 3;
+    public string UPLOADED_FILE_DIRECTORY = "temp";
+    private List<ErrorsPairs>? GetErrorsPairs;
+    private List<List<ErrorsPairs>>? GetErrorsPairsList = new List<List<ErrorsPairs>>();
+    private bool IsProcessingExcelLoadingBarVisible = false;
+    List<string>? fullPastFilesPaths = new List<string>();
+    List<string>? fullFailedFilesPaths = new List<string>();
+    string? FullExcelDataFilePath;
+    string numberOfPassedCount = $"Passed Files (0)";
+    string numberOffailedCount = "0";
+    List<List<List<object>>> passedRecord = new();
+    List<List<List<object>>> failedRecord = new();
+    string progressIsVisible = "d-none";
+    string AlertSeverityVisible = "d-none";
+    bool isLoading = false;
+    List<List<object>> SingleSheetRecords = new();
+    int currentRowCount = 0;
+    private bool closePanels = false;
+    private int currentFileCount = 0;
+    private List<SpreadsheetFileAndChipColor> spreadsheetFileAndChipColor = new();
+    private string? FileName { get; set; }
+    private long FileSize { get; set; }
+    private string? FileSizeInString { get; set; }
+    private string? ErrorMessage { get; set; }
+    DataCleaningType dataCleaningType = new();
+    private List<DataCleaningTypeModel>? TopExpandPanelsContent { get; set; } = new();
+    int countclick = 0;
+    StringHelper stringHelper = new StringHelper();
+    List<string> allowedFileNames = new();
+    private async Task REF_InsertThisAsLatesReference()
+    {
+        StartTimer();
+        closePanels = false;
+        passedRecord.Clear();
+        failedRecord.Clear();
+        progressIsVisible = "d-block";
+        var _spreadsheetFileAndChipColor = spreadsheetFileAndChipColor.Where(passed => passed.IsPassed == false).ToList();
+        foreach (var item in _spreadsheetFileAndChipColor)
+        {
+            await INSERTREF_REF_GetSpreadsheetData(item.SpreadsheetFile);
+        }
+        numberOfPassedCount = $"Passed Files ({passedRecord.Count})";
+        numberOffailedCount = failedRecord.Count.ToString();
+        progressIsVisible = "d-none";
+    }
+    private async Task REF_StartReferencing()
+    {
+        StartTimer();
+        closePanels = false;
+        passedRecord.Clear();
+        failedRecord.Clear();
+        progressIsVisible = "d-block";
+        var _spreadsheetFileAndChipColor = spreadsheetFileAndChipColor.Select(passed => passed.IsPassed).ToList();
+        foreach (var item in spreadsheetFileAndChipColor)
+        {
+            await REF_GetSpreadsheetData(item.SpreadsheetFile);
+        }
+        numberOfPassedCount = $"Passed Files ({passedRecord.Count})";
+        numberOffailedCount = failedRecord.Count.ToString();
+        progressIsVisible = "d-none";
+    }
+    private async Task<CleaningStatus> REF_GetSpreadsheetData(IBrowserFile browserFile)
+    {
+        StreamHelper streamHelper = new();
+        if (expandPanelSelectedOption == "ind")
+        {
+            //List<IndividualContext> ExcelDataRecieved = new();
+            try
+            {
+                // Resetting variables
+                FileName = string.Empty; FileSize = default; FileSizeInString = string.Empty; string extension = string.Empty;
+                extension = Path.GetExtension(browserFile.Name);
+                if (browserFile != null && extension == ".xlsx")
+                {
+                    FileName = browserFile.Name; FileSize = browserFile.Size; FileSizeInString = $"{streamHelper.ConvertLongToMB(FileSize).ToString()}MB";
+
+                    // Define a secure directory path (outside wwwroot for security)
+                    string uploadDirectory = Path.Combine(Environment.WebRootPath, UPLOADED_FILE_DIRECTORY);
+                    // Ensure the directory exists
+                    if (!Directory.Exists(uploadDirectory)) { Directory.CreateDirectory(uploadDirectory); }
+
+                    // Stream the uploaded file
+                    using var filestream = browserFile.OpenReadStream(MAX_FILESIZE);
+
+                    // Generate a secure random file name
+                    var randomFileName = $"{Path.GetRandomFileName()}_____{FileName}";
+
+
+                    // Combine directory with the sanitized file name and extension
+                    FullExcelDataFilePath = Path.Combine(uploadDirectory, Path.ChangeExtension(randomFileName, extension));// made of of directory and file name
+                    //ExcelDataRecieved.Clear();
+                    //SpreadSheetStatus = new();
+                    using var destinationStream = new FileStream(FullExcelDataFilePath, FileMode.Create);
+                    await filestream.CopyToAsync(destinationStream);
+                    var (ExcelDataRecieved, SpreadSheetStatus) = await REFReadFromExcelAsync<DBIndividualContext>(destinationStream, FileName);
+
+                    //ReadFromExcel(destinationStream, out ExcelDataRecieved, out SpreadSheetStatus);
+                    CleanserBlazorUI.DevelopmentFolder.ExtractSpreadSheetHeader.HeaderExtracter(destinationStream);
+                    var numberOfHeaderErrors = SpreadSheetStatus.InvalidHeaders.Count;
+                    if (numberOfHeaderErrors >= 1)
+                    {
+                        AlertSeverityVisible = "d-block";
+                        AlertSeverityMessage = "Warning: The uploaded spreadsheet(s) does not contains the expected headers";
+                        AlertSeverity = MudBlazor.Severity.Warning;
+                        StateHasChanged();
+                        failedRecord.Add(SingleSheetRecords);
+                        fullFailedFilesPaths.Add(FullExcelDataFilePath);
+                        GetErrorsPairs = new List<ErrorsPairs>();
+                        GetErrorsPairs = SpreadSheetStatus.InvalidHeaders;
+                        GetErrorsPairsList.Add(GetErrorsPairs);
+                    }
+                    else
+                    {
+                        AlertSeverityMessage = "Success: The uploaded spreadsheet contains the expected headers";
+                        AlertSeverity = MudBlazor.Severity.Success;
+                        AlertSeverityVisible = "d-block";
+                        //await DataManagementService.SaveExcelDataToDatabaseInd(ExcelDataRecieved);
+                        StateHasChanged();
+                        //await DataManagementService.SaveExcelDataToDatabaseInd(ExcelDataRecieved);
+                        var RefData = await DataManagementService.GETReferenceData_IND("filename");
+                        var mainMatcherTransformer = REF_MainMatcherTransformer(RefData, ExcelDataRecieved);
+                        byte[] ExcelDataTobeDownloaded = await REF_SaveToExcelAsync(mainMatcherTransformer);
+                        await REF_DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
+                        File.Delete(FullExcelDataFilePath!);
+                        AlertSeverityVisible = "d-none";
+                    }
+                }
+
+            }
+            catch (Exception)
+            {
+            }
+            return CleaningStatus.CompletedWithUnknownErrors;
+        }
+        if (expandPanelSelectedOption == "bus")
+        {
+            try
+            {
+                // Resetting variables
+                FileName = string.Empty; FileSize = default; FileSizeInString = string.Empty; string extension = string.Empty;
+                extension = Path.GetExtension(browserFile.Name);
+                if (browserFile != null && extension == ".xlsx")
+                {
+                    FileName = browserFile.Name; FileSize = browserFile.Size; FileSizeInString = $"{streamHelper.ConvertLongToMB(FileSize).ToString()}MB";
+
+                    // Define a secure directory path (outside wwwroot for security)
+                    string uploadDirectory = Path.Combine(Environment.WebRootPath, UPLOADED_FILE_DIRECTORY);
+                    // Ensure the directory exists
+                    if (!Directory.Exists(uploadDirectory)) { Directory.CreateDirectory(uploadDirectory); }
+
+                    // Stream the uploaded file
+                    using var filestream = browserFile.OpenReadStream(MAX_FILESIZE);
+
+                    // Generate a secure random file name
+                    var randomFileName = $"{Path.GetRandomFileName()}_____{FileName}";
+
+
+                    // Combine directory with the sanitized file name and extension
+                    FullExcelDataFilePath = Path.Combine(uploadDirectory, Path.ChangeExtension(randomFileName, extension));// made of of directory and file name
+                    //ExcelDataRecieved.Clear();
+                    //SpreadSheetStatus = new();
+                    using var destinationStream = new FileStream(FullExcelDataFilePath, FileMode.Create);
+                    await filestream.CopyToAsync(destinationStream);
+                    var (ExcelDataRecieved, SpreadSheetStatus) = await REFReadFromExcelAsync<DBBusinessContext>(destinationStream, FileName);
+                    //await SaveExcelDataToDatabaseBus(ExcelDataRecieved);
+                    var numberOfHeaderErrors = SpreadSheetStatus.InvalidHeaders.Count;
+                    if (numberOfHeaderErrors >= 1)
+                    {
+                        failedRecord.Add(SingleSheetRecords);
+                        fullFailedFilesPaths.Add(FullExcelDataFilePath);
+                        GetErrorsPairs = new List<ErrorsPairs>();
+                        GetErrorsPairs = SpreadSheetStatus.InvalidHeaders;
+                        GetErrorsPairsList.Add(GetErrorsPairs);
+                    }
+                    else
+                    {
+                        //await DataManagementService.SaveExcelDataToDatabaseInd(ExcelDataRecieved);
+                        byte[] ExcelDataTobeDownloaded = await REF_SaveToExcelAsync(ExcelDataRecieved);
+                        await REF_DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
+                        File.Delete(FullExcelDataFilePath!);
+                    }
+                }
+
+            }
+            catch (Exception)
+            {
+            }
+            return CleaningStatus.CompletedWithUnknownErrors;
+        }
+        return new CleaningStatus();
+    }
+    private async Task<CleaningStatus> INSERTREF_REF_GetSpreadsheetData(IBrowserFile browserFile)
+    {
+        StreamHelper streamHelper = new();
+        if (expandPanelSelectedOption == "ind")
+        {
+            //List<IndividualContext> ExcelDataRecieved = new();
+            try
+            {
+                // Resetting variables
+                FileName = string.Empty; FileSize = default; FileSizeInString = string.Empty; string extension = string.Empty;
+                extension = Path.GetExtension(browserFile.Name);
+                if (browserFile != null && extension == ".xlsx")
+                {
+                    FileName = browserFile.Name; FileSize = browserFile.Size; FileSizeInString = $"{streamHelper.ConvertLongToMB(FileSize).ToString()}MB";
+
+                    // Define a secure directory path (outside wwwroot for security)
+                    string uploadDirectory = Path.Combine(Environment.WebRootPath, UPLOADED_FILE_DIRECTORY);
+                    // Ensure the directory exists
+                    if (!Directory.Exists(uploadDirectory)) { Directory.CreateDirectory(uploadDirectory); }
+
+                    // Stream the uploaded file
+                    using var filestream = browserFile.OpenReadStream(MAX_FILESIZE);
+
+                    // Generate a secure random file name
+                    var randomFileName = $"{Path.GetRandomFileName()}_____{FileName}";
+
+
+                    // Combine directory with the sanitized file name and extension
+                    FullExcelDataFilePath = Path.Combine(uploadDirectory, Path.ChangeExtension(randomFileName, extension));// made of of directory and file name
+                    //ExcelDataRecieved.Clear();
+                    //SpreadSheetStatus = new();
+                    using var destinationStream = new FileStream(FullExcelDataFilePath, FileMode.Create);
+                    await filestream.CopyToAsync(destinationStream);
+                    var (ExcelDataRecieved, SpreadSheetStatus) = await REFReadFromExcelAsync<DBIndividualContext>(destinationStream, FileName);
+
+                    //ReadFromExcel(destinationStream, out ExcelDataRecieved, out SpreadSheetStatus);
+                    CleanserBlazorUI.DevelopmentFolder.ExtractSpreadSheetHeader.HeaderExtracter(destinationStream);
+                    var numberOfHeaderErrors = SpreadSheetStatus.InvalidHeaders.Count;
+                    if (numberOfHeaderErrors >= 1)
+                    {
+                        AlertSeverityVisible = "d-block";
+                        AlertSeverityMessage = "Warning: The uploaded spreadsheet(s) does not contains the expected headers";
+                        AlertSeverity = MudBlazor.Severity.Warning;
+                        StateHasChanged();
+                        failedRecord.Add(SingleSheetRecords);
+                        fullFailedFilesPaths.Add(FullExcelDataFilePath);
+                        GetErrorsPairs = new List<ErrorsPairs>();
+                        GetErrorsPairs = SpreadSheetStatus.InvalidHeaders;
+                        GetErrorsPairsList.Add(GetErrorsPairs);
+                    }
+                    else
+                    {
+                        AlertSeverityMessage = "Success: The uploaded spreadsheet contains the expected headers";
+                        AlertSeverity = MudBlazor.Severity.Success;
+                        AlertSeverityVisible = "d-block";
+                        StateHasChanged();
+                        await DataManagementService.Initialize_SaveExcelDataToDatabaseInd(ExcelDataRecieved, REF_filename);
+                        File.Delete(FullExcelDataFilePath!);
+                        AlertSeverityVisible = "d-none";
+                    }
+                }
+
+            }
+            catch (Exception)
+            {
+            }
+            return CleaningStatus.CompletedWithUnknownErrors;
+        }
+        if (expandPanelSelectedOption == "bus")
+        {
+            try
+            {
+                // Resetting variables
+                FileName = string.Empty; FileSize = default; FileSizeInString = string.Empty; string extension = string.Empty;
+                extension = Path.GetExtension(browserFile.Name);
+                if (browserFile != null && extension == ".xlsx")
+                {
+                    FileName = browserFile.Name; FileSize = browserFile.Size; FileSizeInString = $"{streamHelper.ConvertLongToMB(FileSize).ToString()}MB";
+
+                    // Define a secure directory path (outside wwwroot for security)
+                    string uploadDirectory = Path.Combine(Environment.WebRootPath, UPLOADED_FILE_DIRECTORY);
+                    // Ensure the directory exists
+                    if (!Directory.Exists(uploadDirectory)) { Directory.CreateDirectory(uploadDirectory); }
+
+                    // Stream the uploaded file
+                    using var filestream = browserFile.OpenReadStream(MAX_FILESIZE);
+
+                    // Generate a secure random file name
+                    var randomFileName = $"{Path.GetRandomFileName()}_____{FileName}";
+
+
+                    // Combine directory with the sanitized file name and extension
+                    FullExcelDataFilePath = Path.Combine(uploadDirectory, Path.ChangeExtension(randomFileName, extension));// made of of directory and file name
+                    //ExcelDataRecieved.Clear();
+                    //SpreadSheetStatus = new();
+                    using var destinationStream = new FileStream(FullExcelDataFilePath, FileMode.Create);
+                    await filestream.CopyToAsync(destinationStream);
+                    var (ExcelDataRecieved, SpreadSheetStatus) = await REFReadFromExcelAsync<DBBusinessContext>(destinationStream, FileName);
+                    //await SaveExcelDataToDatabaseBus(ExcelDataRecieved);
+                    var numberOfHeaderErrors = SpreadSheetStatus.InvalidHeaders.Count;
+                    if (numberOfHeaderErrors >= 1)
+                    {
+                        failedRecord.Add(SingleSheetRecords);
+                        fullFailedFilesPaths.Add(FullExcelDataFilePath);
+                        GetErrorsPairs = new List<ErrorsPairs>();
+                        GetErrorsPairs = SpreadSheetStatus.InvalidHeaders;
+                        GetErrorsPairsList.Add(GetErrorsPairs);
+                    }
+                    else
+                    {
+                        //await DataManagementService.SaveExcelDataToDatabaseInd(ExcelDataRecieved);
+                        byte[] ExcelDataTobeDownloaded = await REF_SaveToExcelAsync(ExcelDataRecieved);
+                        await REF_DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
+                        File.Delete(FullExcelDataFilePath!);
+                    }
+                }
+
+            }
+            catch (Exception)
+            {
+            }
+            return CleaningStatus.CompletedWithUnknownErrors;
+        }
+        return new CleaningStatus();
+    }
+    protected override async Task OnInitializedAsync()
+    {
+        allowedFileNames = await DataManagementService.GetSubscriberUserInfosShotCode();
+        TopExpandPanelsContent = dataCleaningType.GetDataReferencings();
+        progressIsVisible = "d-none";
+        AlertSeverityVisible = "d-none";
+        _timer = new System.Timers.Timer(5000);
+        _timer.Elapsed += OnTimerElapsed;
+        _timer.AutoReset = true;
+    }
+    private async void OnTimerElapsed(object sender, System.Timers.ElapsedEventArgs e)
+    {
+        _elapsedTime = _elapsedTime.Add(TimeSpan.FromSeconds(5));
+        writeCounting = writeCounting;
+        readCounting = readCounting;
+        await InvokeAsync(StateHasChanged);
+    }
+    private void StartTimer()
+    {
+        _timer.Start();
+        _isRunning = true;
+    }
+    private void StopTimer()
+    {
+        _timer.Stop();
+        _isRunning = false;
+    }
+    private void ResetTimer()
+    {
+        _elapsedTime = TimeSpan.Zero;
+        StopTimer();
+        StateHasChanged();
+    }
+    public void Dispose()
+    {
+        _timer.Dispose();
+    }
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_jsInitialized)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("initializeDragAndDrop", DropZone);
+                _jsInitialized = true; // Ensure JS is initialized only once
+            }
+            catch (Exception ex)
+            {
+            }
+        }
+    }
+    int numberofFileswithoutreference = 0;
+    private async Task REF_FileUpload(InputFileChangeEventArgs e)
+    {
+        REF_ResetVariables();
+        isLoading = true;
+        GetErrorsPairsList.Clear();
+
+
+        foreach (var browserFile in e.GetMultipleFiles(MAX_FILES))
+        {
+            try
+            {
+               
+                var shortname = await DataManagementService.GetShortCodefromReferencing(browserFile.Name, stringHelper.GetBusinessTypeFromFile(browserFile.Name));
+                var extension = Path.GetExtension(browserFile.Name);
+                if (browserFile != null && extension == ".xlsx" && !string.IsNullOrWhiteSpace(shortname))
+                {
+                    spreadsheetFileAndChipColor.Add(new SpreadsheetFileAndChipColor { SpreadsheetFile = browserFile, SpreadsheetFileColor = Color.Primary, IsPassed = true });
+                }
+                else
+                {
+                    spreadsheetFileAndChipColor.Add(new SpreadsheetFileAndChipColor { SpreadsheetFile = browserFile, SpreadsheetFileColor = Color.Error, IsPassed = false });
+                    numberofFileswithoutreference++;
+                }
+            }
+            catch (Exception)
+            {
+            }
+
+        }
+        if (numberofFileswithoutreference > 0)
+        {
+            showorHideInsertReferenceButton = "d-block";
+            showorHideReferenceButton = "d-none";
+        }
+        StateHasChanged();
+        currentFileCount = spreadsheetFileAndChipColor.Count;
+        isLoading = false;
+    }
+    private void REF_RemoveFile(SpreadsheetFileAndChipColor file)
+    {
+        spreadsheetFileAndChipColor.Remove(file);
+        currentFileCount = spreadsheetFileAndChipColor.Count;
+        StateHasChanged();
+    }
+    private void REF_ClearSeletedFiles()
+    {
+        spreadsheetFileAndChipColor.Clear();
+        currentFileCount = spreadsheetFileAndChipColor.Count;
+        fullPastFilesPaths.Clear();
+        fullFailedFilesPaths.Clear();
+        REF_ResetVariables();
+        StateHasChanged();
+    }
+    string oldselectedPanel = string.Empty;
+    private void REF_OnPanelExpandedChanged(string selectedPanel)
+    {
+        REF_ClearSeletedFiles();
+        expandPanelSelectedOption = selectedPanel;
+    }
+    private async Task REF_DownloadExcelDataStream(byte[] excelData, string targetFilePath)
+    {
+        string SecuredFileNameOrRawFileName = targetFilePath!;
+        if (PRINT_EXCEL_WITH_SECURED_NAME)
+        {
+            SecuredFileNameOrRawFileName = Path.GetFileName(targetFilePath!);
+        }
+        else { SecuredFileNameOrRawFileName = REF_GetFileNameFromFile(targetFilePath!); }
+        // Trigger download using JavaScript Interop
+        await JS.InvokeVoidAsync("downloadFile", SecuredFileNameOrRawFileName, excelData, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        File.Delete(FullExcelDataFilePath!);
+    }
+    private string REF_GetFileNameFromFile(string path)
+    {
+        string item = Path.GetFileName(path);
+        item = item.Split("_____")[1];
+        item = item.Replace(".xlsx", "_TBC.xlsx");
+        return item;
+    }
+    private void REF_ResetVariables()
+    {
+        passedRecord.Clear();
+        failedRecord.Clear();
+        numberOfPassedCount = $"Passed Files (0)";
+        numberOffailedCount = "0";
+        fullPastFilesPaths.Clear();
+        fullFailedFilesPaths.Clear();
+    }
+    private List<string> REF_GetAllFailedFileLenght()
+    {
+        List<string> _allfailedfiles = new();
+        foreach (var item in fullFailedFilesPaths ?? new List<string>())
+        {
+            _allfailedfiles.Add(REF_GetFileNameFromFile(item));
+        }
+        return _allfailedfiles;
+    }
+    public async Task<byte[]> REF_SaveToExcelAsync<T>(List<T> context)
+    {
+        return await Task.Run(() =>
+        {
+
+            using (var wb = new XLWorkbook())
+            {
+                var ws = wb.Worksheets.Add("TBC");
+                var wsu = wb.Worksheets.Add("DOB ERRORS");
+
+                if (typeof(T) == typeof(DBBusinessContext))
+                {
+                    REF_WriteHeaders(ws, wsu, SpreadSheetHeadersData.Business, 159);
+                    REF_WriteData(context.OfType<DBBusinessContext>().ToList(), ws,wsu);
+                }
+                else if (typeof(T) == typeof(DBIndividualContext))
+                {
+                    REF_WriteHeaders(ws, wsu, SpreadSheetHeadersData.Individual, 179);
+                    REF_WriteData(context.OfType<DBIndividualContext>().ToList(), ws, wsu);
+                }
+
+                using var stream = new MemoryStream();
+                wb.SaveAs(stream);
+                return stream.ToArray();
+            }
+        });
+    }
+    string REF_filename = string.Empty;
+    public async Task<(List<T> REF_excelDataReceived, SpreadSheetStatusContext spreadSheetStatus)> REFReadFromExcelAsync<T>(Stream fileResult, string _filename, int chunkSize = 100)
+    {
+        return await Task.Run(() =>
+        {
+            REF_filename = _filename;
+            var excelDataReceived = new List<T>();
+            //var excelDataReceivedRef = new List<T>();
+            var spreadSheetStatus = new SpreadSheetStatusContext();
+
+            using (var wb = new XLWorkbook(fileResult))
+            {
+                // Assumes that the data is in the first worksheet.
+                var ws = wb.Worksheet(1);
+
+                // Get all used rows. Alternatively, use ws.Rows() if you want every row.
+                var rows = ws.RowsUsed().ToList();
+                var headerRow = ws.Row(1);
+                if (headerRow == null)
+                {
+                    // spreadSheetStatus.Errors.Add("Header row is missing.");
+                    return (excelDataReceived, spreadSheetStatus);
+                }
+
+                // Extract headers from the header row.
+                var actualHeaders = headerRow.Cells()
+          .Select(cell => cell.GetValue<string>().Trim().ToLower().Replace(" ", ""))
+          .ToList();
+                // If processing BusinessContext type, validate headers and process rows.
+                if (typeof(T) == typeof(DBBusinessContext))
+                {
+                    //var busTransformer = new BusinessDataTransformer();
+                    var expectedHeaders = SpreadSheetHeadersData.Business
+            .Select(h => h.Trim().ToLower())
+            .ToList();
+
+                    REF_ValidateHeaders(expectedHeaders, actualHeaders, spreadSheetStatus);
+
+                    // If there are header errors, return early.
+                    if (spreadSheetStatus.InvalidHeaders.Any())
+                    {
+                        return (excelDataReceived, spreadSheetStatus);
+                    }
+
+                    // Get all data rows (skip header row).
+                    var dataRows = rows.Skip(1).ToList();
+                    int totalRows = dataRows.Count;
+                    int processedRows = 0;
+
+                    // Process rows in chunks.
+                    while (processedRows < totalRows)
+                    {
+                        // Get the next chunk of rows.
+                        var currentChunk = dataRows.Skip(processedRows).Take(chunkSize);
+                        foreach (var row in currentChunk)
+                        {
+
+                            // Create a new BusinessContext instance from the row.
+                            // (You can adjust the column indices and mapping as required.)
+                            // var newItem = (T)(object)new DBBusinessContext
+                            //     {
+                            //         Facilityaccnum = row.Cell(3).GetString(),
+                            //         CustomerID = row.Cell(4).GetString(),
+                            //         DisbursementDate = row.Cell(46).GetString()
+                            //     };
+                            var newItem = (T)(object)new DBBusinessContext
+                                {
+                                    CorrectionIndicator = row.Cell(2).GetString(),
+                                    Facilityaccnum = row.Cell(3).GetString(),
+                                    CustomerID = row.Cell(4).GetString(),
+                                    BranchCode = row.Cell(5).GetString(),
+                                    Busregnum = row.Cell(6).GetString(),
+                                    Prevregnum = row.Cell(7).GetString(),
+                                    Tinum = row.Cell(8).GetString(),
+                                    Sectorindcode = row.Cell(9).GetString(),
+                                    Subsecindcode = row.Cell(10).GetString(),
+                                    Bustype = row.Cell(11).GetString(),
+                                    Registrationdate = row.Cell(12).GetString(),
+                                    Commencementdate = row.Cell(13).GetString(),
+                                    Businessname = row.Cell(14).GetString(),
+                                    Tradingname = row.Cell(15).GetString(),
+                                    Turnovercurrency = row.Cell(16).GetString(),
+                                    Turnoveramount = row.Cell(17).GetString(),
+                                    Prevbusname = row.Cell(18).GetString(),
+                                    ProofOfAddType = row.Cell(19).GetString(),
+                                    ProofOfAddNum = row.Cell(20).GetString(),
+                                    Curlocadd1 = row.Cell(21).GetString(),
+                                    Curlocadd2 = row.Cell(22).GetString(),
+                                    Curlocadd3 = row.Cell(23).GetString(),
+                                    Curlocadd4 = row.Cell(24).GetString(),
+                                    Curlocaddrpostalcode = row.Cell(25).GetString(),
+                                    PostAddrLine1 = row.Cell(26).GetString(),
+                                    PostAddrLine2 = row.Cell(27).GetString(),
+                                    PostAddrLine3 = row.Cell(28).GetString(),
+                                    PostAddrLine4 = row.Cell(29).GetString(),
+                                    PostalAddPostCode = row.Cell(30).GetString(),
+                                    Websiteadd = row.Cell(31).GetString(),
+                                    EmailAddress = row.Cell(32).GetString(),
+                                    Officetel1 = row.Cell(33).GetString(),
+                                    Officetel2 = row.Cell(34).GetString(),
+                                    Officefaxnum = row.Cell(35).GetString(),
+                                    OldCustomerID = row.Cell(36).GetString(),
+                                    OldAccountNum = row.Cell(37).GetString(),
+                                    OldSRN = row.Cell(38).GetString(),
+                                    OldBranchCode = row.Cell(39).GetString(),
+                                    CreditFacilityType = row.Cell(40).GetString(),
+                                    PurposeOfFacility = row.Cell(41).GetString(),
+                                    FacilityTerm = row.Cell(42).GetString(),
+                                    DefPaymentStartDate = row.Cell(43).GetString(),
+                                    AmountCurrency = row.Cell(44).GetString(),
+                                    FacilityAmount = row.Cell(45).GetString(),
+                                    DisbursementDate = row.Cell(46).GetString(),
+                                    DisbursementAmt = row.Cell(47).GetString(),
+                                    MaturityDate = row.Cell(48).GetString(),
+                                    SchdInstalAmount = row.Cell(49).GetString(),
+                                    RepaymentFreq = row.Cell(50).GetString(),
+                                    LastPaymentAmount = row.Cell(51).GetString(),
+                                    LastPaymentDate = row.Cell(52).GetString(),
+                                    NextPaymentDate = row.Cell(53).GetString(),
+                                    CurBal = row.Cell(54).GetString(),
+                                    CurBalIndicator = row.Cell(55).GetString(),
+                                    AssetClassification = row.Cell(56).GetString(),
+                                    AmountInArrears = row.Cell(57).GetString(),
+                                    ArrearsStartDate = row.Cell(58).GetString(),
+                                    NDIA = row.Cell(59).GetString(),
+                                    PaymentHistoryProfile = row.Cell(60).GetString(),
+                                    AmtOverdue1to30days = row.Cell(61).GetString(),
+                                    AmtOverdue31to60days = row.Cell(62).GetString(),
+                                    AmtOverdue61to90days = row.Cell(63).GetString(),
+                                    AmtOverdue91to120days = row.Cell(64).GetString(),
+                                    Amtoverdue121To150Days = row.Cell(65).GetString(),
+                                    AmtOverdue151to180days = row.Cell(66).GetString(),
+                                    AmtOverdue181orMore = row.Cell(67).GetString(),
+                                    LegalFlag = row.Cell(68).GetString(),
+                                    FacilityStatusCode = row.Cell(69).GetString(),
+                                    FacilityStatusDate = row.Cell(70).GetString(),
+                                    ClosedDate = row.Cell(71).GetString(),
+                                    ClosureReason = row.Cell(72).GetString(),
+                                    WrittenOffAmt = row.Cell(73).GetString(),
+                                    ReasonForWrittenOff = row.Cell(74).GetString(),
+                                    DateRestructured = row.Cell(75).GetString(),
+                                    ReasonForRestructure = row.Cell(76).GetString(),
+                                    CreditCollateralInd = row.Cell(77).GetString(),
+                                    SecurityType = row.Cell(78).GetString(),
+                                    NatureOfCharge = row.Cell(79).GetString(),
+                                    SecurityValue = row.Cell(80).GetString(),
+                                    CollRegRefNum = row.Cell(81).GetString(),
+                                    SpecialCommentsCode = row.Cell(82).GetString(),
+                                    NatureOfGuarantor1 = row.Cell(83).GetString(),
+                                    NameOfComGuarantor1 = row.Cell(84).GetString(),
+                                    BusRegOfGuarantor1 = row.Cell(85).GetString(),
+                                    G1Surname = row.Cell(86).GetString(),
+                                    G1FirstName = row.Cell(87).GetString(),
+                                    G1MiddleNames = row.Cell(88).GetString(),
+                                    G1NatID = row.Cell(89).GetString(),
+                                    G1VotID = row.Cell(90).GetString(),
+                                    G1DrivLic = row.Cell(91).GetString(),
+                                    G1PassNum = row.Cell(92).GetString(),
+                                    G1SSN = row.Cell(93).GetString(),
+                                    G1Gender = row.Cell(94).GetString(),
+                                    G1DOB = row.Cell(95).GetString(),
+                                    G1Add1 = row.Cell(96).GetString(),
+                                    G1Add2 = row.Cell(97).GetString(),
+                                    G1Add3 = row.Cell(98).GetString(),
+                                    G1HomeTel = row.Cell(99).GetString(),
+                                    G1WorkTel = row.Cell(100).GetString(),
+                                    G1Mobile = row.Cell(101).GetString(),
+                                    NatureOfGuarantor2 = row.Cell(102).GetString(),
+                                    NameOfComGuarantor2 = row.Cell(103).GetString(),
+                                    Busregofguarantor2 = row.Cell(104).GetString(),
+                                    G2Surname = row.Cell(105).GetString(),
+                                    G2FirstName = row.Cell(106).GetString(),
+                                    G2MiddleNames = row.Cell(107).GetString(),
+                                    G2NatID = row.Cell(108).GetString(),
+                                    G2VotID = row.Cell(109).GetString(),
+                                    G2DrivLic = row.Cell(110).GetString(),
+                                    G2PassNum = row.Cell(111).GetString(),
+                                    G2SSN = row.Cell(112).GetString(),
+                                    G2Gender = row.Cell(113).GetString(),
+                                    G2DOB = row.Cell(114).GetString(),
+                                    G2Add1 = row.Cell(115).GetString(),
+                                    G2Add2 = row.Cell(116).GetString(),
+                                    G2Add3 = row.Cell(117).GetString(),
+                                    G2HomeTel = row.Cell(118).GetString(),
+                                    G2WorkTel = row.Cell(119).GetString(),
+                                    G2Mobile = row.Cell(120).GetString(),
+                                    NatureOfGuarantor3 = row.Cell(121).GetString(),
+                                    NameOfComGuarantor3 = row.Cell(122).GetString(),
+                                    BusRegOfGuarantor3 = row.Cell(123).GetString(),
+                                    G3Surname = row.Cell(124).GetString(),
+                                    G3FirstName = row.Cell(125).GetString(),
+                                    G3MiddleNames = row.Cell(126).GetString(),
+                                    G3NatID = row.Cell(127).GetString(),
+                                    G3VotID = row.Cell(128).GetString(),
+                                    G3DrivLic = row.Cell(129).GetString(),
+                                    G3PassNum = row.Cell(130).GetString(),
+                                    G3SSN = row.Cell(131).GetString(),
+                                    G3Gender = row.Cell(132).GetString(),
+                                    G3DOB = row.Cell(133).GetString(),
+                                    G3Add1 = row.Cell(134).GetString(),
+                                    G3Add2 = row.Cell(135).GetString(),
+                                    G3Add3 = row.Cell(136).GetString(),
+                                    G3HomeTel = row.Cell(137).GetString(),
+                                    G3WorkTel = row.Cell(138).GetString(),
+                                    G3Mobile = row.Cell(139).GetString(),
+                                    NatureOfGuarantor4 = row.Cell(140).GetString(),
+                                    NameOfComGuarantor4 = row.Cell(141).GetString(),
+                                    BusRegOfGuarantor4 = row.Cell(142).GetString(),
+                                    G4Surname = row.Cell(143).GetString(),
+                                    G4FirstName = row.Cell(144).GetString(),
+                                    G4MiddleNames = row.Cell(145).GetString(),
+                                    G4NatID = row.Cell(146).GetString(),
+                                    G4VotID = row.Cell(147).GetString(),
+                                    G4DrivLic = row.Cell(148).GetString(),
+                                    G4PassNum = row.Cell(149).GetString(),
+                                    G4SSN = row.Cell(150).GetString(),
+                                    G4Gender = row.Cell(151).GetString(),
+                                    G4DOB = row.Cell(152).GetString(),
+                                    G4Add1 = row.Cell(153).GetString(),
+                                    G4Add2 = row.Cell(154).GetString(),
+                                    G4Add3 = row.Cell(155).GetString(),
+                                    G4HomeTel = row.Cell(156).GetString(),
+                                    G4WorkTel = row.Cell(157).GetString(),
+                                    G4Mobile = row.Cell(158).GetString()
+
+                                };
+                            readCounting++;
+                            excelDataReceived.Add(newItem);
+                        }
+
+                        // Update processed rows counter.
+                        processedRows += chunkSize;
+
+                        // Optionally: You can add a delay, log progress, or even yield control here.
+                    }
+                }
+                // Handle other types (for example, IndividualContext) in a similar manner.
+                else if (typeof(T) == typeof(DBIndividualContext))
+                {
+                    //var indTransformer = new IndividualDataTransformer();
+                    var expectedHeaders = SpreadSheetHeadersData.Individual
+            .Select(h => h.Trim().ToLower())
+            .ToList();
+
+                    REF_ValidateHeaders(expectedHeaders, actualHeaders, spreadSheetStatus);
+
+                    // If there are header errors, return early.
+                    if (spreadSheetStatus.InvalidHeaders.Any())
+                    {
+                        return (excelDataReceived, spreadSheetStatus);
+                    }
+
+                    // Get all data rows (skip header row).
+                    var dataRows = rows.Skip(1).ToList();
+                    int totalRows = dataRows.Count;
+                    int processedRows = 0;
+
+                    // Process rows in chunks.
+                    while (processedRows < totalRows)
+                    {
+                        var currentChunk = dataRows.Skip(processedRows).Take(chunkSize);
+                        foreach (var row in currentChunk)
+                        {
+                            var newItem = (T)(object)new DBIndividualContext
+                            {
+                                CorrectionIndicator = row.Cell(2).GetString(),
+                                CreditFacilityAccNum = row.Cell(3).GetString(),
+                                CustomerID = row.Cell(4).GetString(),
+                                BranchCode = row.Cell(5).GetString(),
+                                NatIDNum = row.Cell(6).GetString(),
+                                VotersIDNum = row.Cell(7).GetString(),
+                                DriverLicNum = row.Cell(8).GetString(),
+                                PassportNum = row.Cell(9).GetString(),
+                                SSNum = row.Cell(10).GetString(),
+                                EzwichNum = row.Cell(11).GetString(),
+                                OtherIDType = row.Cell(12).GetString(),
+                                OtherIDNum = row.Cell(13).GetString(),
+                                TINum = row.Cell(14).GetString(),
+                                Gender = row.Cell(15).GetString(),
+                                MaritalStatus = row.Cell(16).GetString(),
+                                Nationality = row.Cell(17).GetString(),
+                                DateOfBirth = row.Cell(18).GetString(),
+                                Title = row.Cell(19).GetString(),
+                                Surname = row.Cell(20).GetString(),
+                                FirstName = row.Cell(21).GetString(),
+                                MiddleNames = row.Cell(22).GetString(),
+                                PreviousNames = row.Cell(23).GetString(),
+                                Alias = row.Cell(24).GetString(),
+                                ProofOfAddType = row.Cell(25).GetString(),
+                                ProofOfAddNum = row.Cell(26).GetString(),
+                                CurResAddr1 = row.Cell(27).GetString(),
+                                CurResAddr2 = row.Cell(28).GetString(),
+                                CurResAddr3 = row.Cell(29).GetString(),
+                                CurResAddr4 = row.Cell(30).GetString(),
+                                CurResAddrPostalCode = row.Cell(31).GetString(),
+                                DateMovedCurrRes = row.Cell(32).GetString(),
+                                PrevResAddr1 = row.Cell(33).GetString(),
+                                PrevResAddr2 = row.Cell(34).GetString(),
+                                PrevResAddr3 = row.Cell(35).GetString(),
+                                PrevResAddr4 = row.Cell(36).GetString(),
+                                PrevResAddrPostalCode = row.Cell(37).GetString(),
+                                OwnerOrTenant = row.Cell(38).GetString(),
+                                PostAddrLine1 = row.Cell(39).GetString(),
+                                PostAddrLine2 = row.Cell(40).GetString(),
+                                PostAddrLine3 = row.Cell(41).GetString(),
+                                PostAddrLine4 = row.Cell(42).GetString(),
+                                PostalAddPostCode = row.Cell(43).GetString(),
+                                EmailAddress = row.Cell(44).GetString(),
+                                HomeTel = row.Cell(45).GetString(),
+                                MobileTel1 = row.Cell(46).GetString(),
+                                MobileTel2 = row.Cell(47).GetString(),
+                                WorkTel = row.Cell(48).GetString(),
+                                NumOfDependants = row.Cell(49).GetString(),
+                                EmpType = row.Cell(50).GetString(),
+                                EmpPayrollNum = row.Cell(51).GetString(),
+                                Paypoint = row.Cell(52).GetString(),
+                                EmpName = row.Cell(53).GetString(),
+                                EmpAddr1 = row.Cell(54).GetString(),
+                                EmpAddr2 = row.Cell(55).GetString(),
+                                EmpAddr3 = row.Cell(56).GetString(),
+                                EmpAddr4 = row.Cell(57).GetString(),
+                                EmpAddrPostalCode = row.Cell(58).GetString(),
+                                DateOfEmp = row.Cell(59).GetString(),
+                                Occupation = row.Cell(60).GetString(),
+                                IncomeCurrency = row.Cell(61).GetString(),
+                                Income = row.Cell(62).GetString(),
+                                JointOrSoleAcc = row.Cell(63).GetString(),
+                                NoParticipantsInAcc = row.Cell(64).GetString(),
+                                OldCustomerID = row.Cell(65).GetString(),
+                                OldAccountNum = row.Cell(66).GetString(),
+                                OldSRN = row.Cell(67).GetString(),
+                                OldBranchCode = row.Cell(68).GetString(),
+                                CreditFacilityType = row.Cell(69).GetString(),
+                                PurposeOfFacility = row.Cell(70).GetString(),
+                                FacilityTerm = row.Cell(71).GetString(),
+                                DefPaymentStartDate = row.Cell(72).GetString(),
+                                AmountCurrency = row.Cell(73).GetString(),
+                                FacilityAmount = row.Cell(74).GetString(),
+                                DisbursementDate = row.Cell(75).GetString(),
+                                DisbursementAmt = row.Cell(76).GetString(),
+                                MaturityDate = row.Cell(77).GetString(),
+                                SchdInstalAmount = row.Cell(78).GetString(),
+                                RepaymentFreq = row.Cell(79).GetString(),
+                                LastPaymentAmount = row.Cell(80).GetString(),
+                                LastPaymentDate = row.Cell(81).GetString(),
+                                NextPaymentDate = row.Cell(82).GetString(),
+                                CurBal = row.Cell(83).GetString(),
+                                CurBalIndicator = row.Cell(84).GetString(),
+                                AssetClassification = row.Cell(85).GetString(),
+                                AmountInArrears = row.Cell(86).GetString(),
+                                ArrearsStartDate = row.Cell(87).GetString(),
+                                NDIA = row.Cell(88).GetString(),
+                                PaymentHistoryProfile = row.Cell(89).GetString(),
+                                AmtOverdue1to30days = row.Cell(90).GetString(),
+                                AmtOverdue31to60days = row.Cell(91).GetString(),
+                                AmtOverdue61to90days = row.Cell(92).GetString(),
+                                AmtOverdue91to120days = row.Cell(93).GetString(),
+                                AmtOverdue121to150days = row.Cell(94).GetString(),
+                                AmtOverdue151to180days = row.Cell(95).GetString(),
+                                AmtOverdue181orMore = row.Cell(96).GetString(),
+                                LegalFlag = row.Cell(97).GetString(),
+                                FacilityStatusCode = row.Cell(98).GetString(),
+                                FacilityStatusDate = row.Cell(99).GetString(),
+                                ClosedDate = row.Cell(100).GetString(),
+                                ClosureReason = row.Cell(101).GetString(),
+                                WrittenOffAmt = row.Cell(102).GetString(),
+                                ReasonForWrittenOff = row.Cell(103).GetString(),
+                                DateRestructured = row.Cell(98).GetString(),
+                                ReasonForRestructure = row.Cell(105).GetString(),
+                                CreditCollateralInd = row.Cell(106).GetString(),
+                                SecurityType = row.Cell(107).GetString(),
+                                NatureOfCharge = row.Cell(108).GetString(),
+                                SecurityValue = row.Cell(109).GetString(),
+                                CollRegRefNum = row.Cell(110).GetString(),
+                                SpecialCommentsCode = row.Cell(111).GetString(),
+                                NatureOfGuarantor = row.Cell(112).GetString(),
+                                NameOfComGuarantor = row.Cell(113).GetString(),
+                                BusRegOfGuarantor = row.Cell(114).GetString(),
+                                G1Surname = row.Cell(115).GetString(),
+                                G1FirstName = row.Cell(116).GetString(),
+                                G1MiddleNames = row.Cell(117).GetString(),
+                                G1NatID = row.Cell(118).GetString(),
+                                G1VotID = row.Cell(119).GetString(),
+                                G1DrivLic = row.Cell(120).GetString(),
+                                G1PassNum = row.Cell(121).GetString(),
+                                G1SSN = row.Cell(122).GetString(),
+                                G1Gender = row.Cell(123).GetString(),
+                                G1DOB = row.Cell(124).GetString(),
+                                G1Add1 = row.Cell(125).GetString(),
+                                G1Add2 = row.Cell(126).GetString(),
+                                G1Add3 = row.Cell(127).GetString(),
+                                G1HomeTel = row.Cell(128).GetString(),
+                                G1WorkTel = row.Cell(129).GetString(),
+                                G1Mobile = row.Cell(130).GetString(),
+                                G2Surname = row.Cell(131).GetString(),
+                                G2FirstName = row.Cell(132).GetString(),
+                                G2MiddleNames = row.Cell(133).GetString(),
+                                G2NatID = row.Cell(134).GetString(),
+                                G2VotID = row.Cell(135).GetString(),
+                                G2DrivLic = row.Cell(136).GetString(),
+                                G2PassNum = row.Cell(137).GetString(),
+                                G2SSN = row.Cell(138).GetString(),
+                                G2Gender = row.Cell(139).GetString(),
+                                G2DOB = row.Cell(140).GetString(),
+                                G2Add1 = row.Cell(141).GetString(),
+                                G2Add2 = row.Cell(142).GetString(),
+                                G2Add3 = row.Cell(143).GetString(),
+                                G2HomeTel = row.Cell(144).GetString(),
+                                G2WorkTel = row.Cell(145).GetString(),
+                                G2Mobile = row.Cell(146).GetString(),
+                                G3Surname = row.Cell(147).GetString(),
+                                G3FirstName = row.Cell(148).GetString(),
+                                G3MiddleNames = row.Cell(149).GetString(),
+                                G3NatID = row.Cell(150).GetString(),
+                                G3VotID = row.Cell(151).GetString(),
+                                G3DrivLic = row.Cell(152).GetString(),
+                                G3PassNum = row.Cell(153).GetString(),
+                                G3SSN = row.Cell(154).GetString(),
+                                G3Gender = row.Cell(155).GetString(),
+                                G3DOB = row.Cell(156).GetString(),
+                                G3Add1 = row.Cell(157).GetString(),
+                                G3Add2 = row.Cell(158).GetString(),
+                                G3Add3 = row.Cell(159).GetString(),
+                                G3HomeTel = row.Cell(160).GetString(),
+                                G3WorkTel = row.Cell(161).GetString(),
+                                G3Mobile = row.Cell(162).GetString(),
+                                G4Surname = row.Cell(163).GetString(),
+                                G4FirstName = row.Cell(164).GetString(),
+                                G4MiddleNames = row.Cell(165).GetString(),
+                                G4NatID = row.Cell(166).GetString(),
+                                G4VotID = row.Cell(167).GetString(),
+                                G4DrivLic = row.Cell(168).GetString(),
+                                G4PassNum = row.Cell(169).GetString(),
+                                G4SSN = row.Cell(170).GetString(),
+                                G4Gender = row.Cell(171).GetString(),
+                                G4DOB = row.Cell(172).GetString(),
+                                G4Add1 = row.Cell(173).GetString(),
+                                G4Add2 = row.Cell(174).GetString(),
+                                G4Add3 = row.Cell(175).GetString(),
+                                G4HomeTel = row.Cell(176).GetString(),
+                                G4WorkTel = row.Cell(177).GetString(),
+                                G4Mobile = row.Cell(178).GetString()
+                            };
+                            readCounting++;
+                            excelDataReceived.Add(newItem);
+                        }
+
+                        processedRows += chunkSize;
+                    }
+                }
+                // Optionally, you can handle other types or throw an exception if T is unsupported.
+            }
+            var ffff = excelDataReceived;
+            return (excelDataReceived, spreadSheetStatus);
+        });
+    }
+    private void REF_ValidateHeaders(List<string> expectedHeaders, List<string> actualHeaders, SpreadSheetStatusContext spreadSheetStatus)
+    {
+        int maxLength = Math.Min(expectedHeaders.Count, actualHeaders.Count);
+        for (int i = 0; i < maxLength; i++)
+        {
+            if (!string.Equals(expectedHeaders[i], actualHeaders[i], StringComparison.OrdinalIgnoreCase))
+            {
+                spreadSheetStatus.InvalidHeaders.Add(new ErrorsPairs(expectedHeaders[i], actualHeaders[i]));
+            }
+        }
+    }
+    private void REF_WriteHeaders(IXLWorksheet ws, IXLWorksheet wsu, List<string> headers, int errorIndex)
+    {
+        for (int i = 0; i < headers.Count; i++)
+        {
+            ws.Cell(1, i + 1).Value = headers[i];
+            wsu.Cell(1, i + 1).Value = headers[i];
+        }
+        wsu.Cell(1, errorIndex).Value = "--------------- Errors ---------------";
+    }
+    private void REF_WriteData<T>(List<T> rows, IXLWorksheet ws, IXLWorksheet wsu) where T : class
+    {
+        int correctDataCellIndex = 2;
+        int wrongDataCellIndex = 2;
+        bool isDateOfBirtWrong = false;
+
+        foreach (var row in rows)
+        {
+            isDateOfBirtWrong = REF_IsDateOfBirtWrong(row);
+            if (isDateOfBirtWrong)
+            {
+                REF_WriteRow(ws, row, ref isDateOfBirtWrong, ref correctDataCellIndex);
+            }
+            else
+            {
+                REF_WriteRow(wsu, row, ref isDateOfBirtWrong, ref wrongDataCellIndex);
+            }
+        }
+        ws.Columns().AdjustToContents();
+        wsu.Columns().AdjustToContents();
+    }
+    private void REF_WriteRow<T>(IXLWorksheet ws, T row, ref bool isDobError, ref int rowIndex)
+    {
+        if (row is DBBusinessContext businessRow)
+        {
+            ws.Cell(rowIndex, 1).Value = "D";
+            ws.Cell(rowIndex, 2).Value = businessRow.CorrectionIndicator;
+            ws.Cell(rowIndex, 3).Value = businessRow.Facilityaccnum;
+            ws.Cell(rowIndex, 4).Value = businessRow.CustomerID;
+            ws.Cell(rowIndex, 5).Value = businessRow.BranchCode;
+            ws.Cell(rowIndex, 6).Value = businessRow.Busregnum;
+            ws.Cell(rowIndex, 7).Value = businessRow.Prevregnum;
+            ws.Cell(rowIndex, 8).Value = businessRow.Tinum;
+            ws.Cell(rowIndex, 9).Value = businessRow.Sectorindcode;
+            ws.Cell(rowIndex, 10).Value = businessRow.Subsecindcode;
+            ws.Cell(rowIndex, 11).Value = businessRow.Bustype;
+            ws.Cell(rowIndex, 12).Value = businessRow.Registrationdate;
+            ws.Cell(rowIndex, 13).Value = businessRow.Commencementdate;
+            ws.Cell(rowIndex, 14).Value = businessRow.Businessname;
+            ws.Cell(rowIndex, 15).Value = businessRow.Tradingname;
+            ws.Cell(rowIndex, 16).Value = businessRow.Turnovercurrency;
+            ws.Cell(rowIndex, 17).Value = businessRow.Turnoveramount;
+            ws.Cell(rowIndex, 18).Value = businessRow.Prevbusname;
+            ws.Cell(rowIndex, 19).Value = businessRow.ProofOfAddType;
+            ws.Cell(rowIndex, 20).Value = businessRow.ProofOfAddNum;
+
+
+
+            ws.Cell(rowIndex, 21).Value = businessRow.Curlocadd1;
+            ws.Cell(rowIndex, 22).Value = businessRow.Curlocadd2;
+            ws.Cell(rowIndex, 23).Value = businessRow.Curlocadd3;
+            ws.Cell(rowIndex, 24).Value = businessRow.Curlocadd4;
+            ws.Cell(rowIndex, 25).Value = businessRow.Curlocaddrpostalcode;
+
+
+            ws.Cell(rowIndex, 26).Value = businessRow.PostAddrLine1;
+            ws.Cell(rowIndex, 27).Value = businessRow.PostAddrLine2;
+            ws.Cell(rowIndex, 28).Value = businessRow.PostAddrLine3;
+            ws.Cell(rowIndex, 29).Value = businessRow.PostAddrLine4;
+
+
+            ws.Cell(rowIndex, 30).Value = businessRow.PostalAddPostCode;
+            ws.Cell(rowIndex, 31).Value = businessRow.Websiteadd;
+            ws.Cell(rowIndex, 32).Value = businessRow.EmailAddress;
+
+            ws.Cell(rowIndex, 33).Value = businessRow.Officetel1;
+            ws.Cell(rowIndex, 34).Value = businessRow.Officetel2;
+            ws.Cell(rowIndex, 35).Value = businessRow.Officefaxnum;
+            ws.Cell(rowIndex, 36).Value = businessRow.OldCustomerID;
+            ws.Cell(rowIndex, 37).Value = businessRow.OldAccountNum;
+            ws.Cell(rowIndex, 38).Value = businessRow.OldSRN;
+            ws.Cell(rowIndex, 39).Value = businessRow.OldBranchCode;
+            ws.Cell(rowIndex, 40).Value = businessRow.CreditFacilityType;
+            ws.Cell(rowIndex, 41).Value = businessRow.PurposeOfFacility;
+            ws.Cell(rowIndex, 42).Value = businessRow.FacilityTerm;
+            ws.Cell(rowIndex, 43).Value = businessRow.DefPaymentStartDate;
+            ws.Cell(rowIndex, 44).Value = businessRow.AmountCurrency;
+            ws.Cell(rowIndex, 45).Value = businessRow.FacilityAmount;
+            ws.Cell(rowIndex, 46).Value = businessRow.DisbursementDate;
+            ws.Cell(rowIndex, 47).Value = businessRow.DisbursementAmt;
+            ws.Cell(rowIndex, 48).Value = businessRow.MaturityDate;
+            ws.Cell(rowIndex, 49).Value = businessRow.SchdInstalAmount;
+            ws.Cell(rowIndex, 50).Value = businessRow.RepaymentFreq;
+            ws.Cell(rowIndex, 51).Value = businessRow.LastPaymentAmount;
+            ws.Cell(rowIndex, 52).Value = businessRow.LastPaymentDate;
+            ws.Cell(rowIndex, 53).Value = businessRow.NextPaymentDate;
+            ws.Cell(rowIndex, 54).Value = businessRow.CurBal;
+            ws.Cell(rowIndex, 55).Value = businessRow.CurBalIndicator;
+            ws.Cell(rowIndex, 56).Value = businessRow.AssetClassification;
+            ws.Cell(rowIndex, 57).Value = businessRow.AmountInArrears;
+            ws.Cell(rowIndex, 58).Value = businessRow.ArrearsStartDate;
+            ws.Cell(rowIndex, 59).Value = businessRow.NDIA;
+            ws.Cell(rowIndex, 60).Value = businessRow.PaymentHistoryProfile;
+            ws.Cell(rowIndex, 61).Value = businessRow.AmtOverdue1to30days;
+            ws.Cell(rowIndex, 62).Value = businessRow.AmtOverdue31to60days;
+            ws.Cell(rowIndex, 63).Value = businessRow.AmtOverdue61to90days;
+            ws.Cell(rowIndex, 64).Value = businessRow.AmtOverdue91to120days;
+            ws.Cell(rowIndex, 65).Value = businessRow.Amtoverdue121To150Days;
+            ws.Cell(rowIndex, 66).Value = businessRow.AmtOverdue151to180days;
+            ws.Cell(rowIndex, 67).Value = businessRow.AmtOverdue181orMore;
+            ws.Cell(rowIndex, 68).Value = businessRow.LegalFlag;
+            ws.Cell(rowIndex, 69).Value = businessRow.FacilityStatusCode;
+            ws.Cell(rowIndex, 70).Value = businessRow.FacilityStatusDate;
+            ws.Cell(rowIndex, 71).Value = businessRow.ClosedDate;
+            ws.Cell(rowIndex, 72).Value = businessRow.ClosureReason;
+            ws.Cell(rowIndex, 73).Value = businessRow.WrittenOffAmt;
+            ws.Cell(rowIndex, 74).Value = businessRow.ReasonForWrittenOff;
+            ws.Cell(rowIndex, 75).Value = businessRow.DateRestructured;
+            ws.Cell(rowIndex, 76).Value = businessRow.ReasonForRestructure;
+            ws.Cell(rowIndex, 77).Value = businessRow.CreditCollateralInd;
+            ws.Cell(rowIndex, 78).Value = businessRow.SecurityType;
+            ws.Cell(rowIndex, 79).Value = businessRow.NatureOfCharge;
+            ws.Cell(rowIndex, 80).Value = businessRow.SecurityValue;
+            ws.Cell(rowIndex, 81).Value = businessRow.CollRegRefNum;
+            ws.Cell(rowIndex, 82).Value = businessRow.SpecialCommentsCode;
+            ws.Cell(rowIndex, 83).Value = businessRow.NatureOfGuarantor1;
+            ws.Cell(rowIndex, 84).Value = businessRow.NameOfComGuarantor1;
+            ws.Cell(rowIndex, 85).Value = businessRow.BusRegOfGuarantor1;
+            ws.Cell(rowIndex, 86).Value = businessRow.G1Surname;
+            ws.Cell(rowIndex, 87).Value = businessRow.G1FirstName;
+            ws.Cell(rowIndex, 88).Value = businessRow.G1MiddleNames;
+            ws.Cell(rowIndex, 89).Value = businessRow.G1NatID;
+            ws.Cell(rowIndex, 90).Value = businessRow.G1VotID;
+            ws.Cell(rowIndex, 91).Value = businessRow.G1DrivLic;
+            ws.Cell(rowIndex, 92).Value = businessRow.G1PassNum;
+            ws.Cell(rowIndex, 93).Value = businessRow.G1SSN;
+            ws.Cell(rowIndex, 94).Value = businessRow.G1Gender;
+            ws.Cell(rowIndex, 95).Value = businessRow.G1DOB;
+            ws.Cell(rowIndex, 96).Value = businessRow.G1Add1;
+            ws.Cell(rowIndex, 97).Value = businessRow.G1Add2;
+            ws.Cell(rowIndex, 98).Value = businessRow.G1Add3;
+            ws.Cell(rowIndex, 99).Value = businessRow.G1HomeTel;
+            ws.Cell(rowIndex, 100).Value = businessRow.G1WorkTel;
+            ws.Cell(rowIndex, 101).Value = businessRow.G1Mobile;
+            ws.Cell(rowIndex, 102).Value = businessRow.NatureOfGuarantor2;
+            ws.Cell(rowIndex, 103).Value = businessRow.NameOfComGuarantor2;
+            ws.Cell(rowIndex, 104).Value = businessRow.Busregofguarantor2;
+            ws.Cell(rowIndex, 105).Value = businessRow.G2Surname;
+            ws.Cell(rowIndex, 106).Value = businessRow.G2FirstName;
+            ws.Cell(rowIndex, 107).Value = businessRow.G2MiddleNames;
+            ws.Cell(rowIndex, 108).Value = businessRow.G2NatID;
+            ws.Cell(rowIndex, 109).Value = businessRow.G2VotID;
+            ws.Cell(rowIndex, 110).Value = businessRow.G2DrivLic;
+            ws.Cell(rowIndex, 111).Value = businessRow.G2PassNum;
+            ws.Cell(rowIndex, 112).Value = businessRow.G2SSN;
+            ws.Cell(rowIndex, 113).Value = businessRow.G2Gender;
+            ws.Cell(rowIndex, 114).Value = businessRow.G2DOB;
+            ws.Cell(rowIndex, 115).Value = businessRow.G2Add1;
+            ws.Cell(rowIndex, 116).Value = businessRow.G2Add2;
+            ws.Cell(rowIndex, 117).Value = businessRow.G2Add3;
+            ws.Cell(rowIndex, 118).Value = businessRow.G2HomeTel;
+            ws.Cell(rowIndex, 119).Value = businessRow.G2WorkTel;
+            ws.Cell(rowIndex, 120).Value = businessRow.G2Mobile;
+            ws.Cell(rowIndex, 121).Value = businessRow.NatureOfGuarantor3;
+            ws.Cell(rowIndex, 122).Value = businessRow.NameOfComGuarantor3;
+            ws.Cell(rowIndex, 123).Value = businessRow.BusRegOfGuarantor3;
+            ws.Cell(rowIndex, 124).Value = businessRow.G3Surname;
+            ws.Cell(rowIndex, 125).Value = businessRow.G3FirstName;
+            ws.Cell(rowIndex, 126).Value = businessRow.G3MiddleNames;
+            ws.Cell(rowIndex, 127).Value = businessRow.G3NatID;
+            ws.Cell(rowIndex, 128).Value = businessRow.G3VotID;
+            ws.Cell(rowIndex, 129).Value = businessRow.G3DrivLic;
+            ws.Cell(rowIndex, 130).Value = businessRow.G3PassNum;
+            ws.Cell(rowIndex, 131).Value = businessRow.G3SSN;
+            ws.Cell(rowIndex, 132).Value = businessRow.G3Gender;
+            ws.Cell(rowIndex, 133).Value = businessRow.G3DOB;
+            ws.Cell(rowIndex, 134).Value = businessRow.G3Add1;
+            ws.Cell(rowIndex, 135).Value = businessRow.G3Add2;
+            ws.Cell(rowIndex, 136).Value = businessRow.G3Add3;
+            ws.Cell(rowIndex, 137).Value = businessRow.G3HomeTel;
+            ws.Cell(rowIndex, 138).Value = businessRow.G3WorkTel;
+            ws.Cell(rowIndex, 139).Value = businessRow.G3Mobile;
+            ws.Cell(rowIndex, 140).Value = businessRow.NatureOfGuarantor4;
+            ws.Cell(rowIndex, 141).Value = businessRow.NameOfComGuarantor4;
+            ws.Cell(rowIndex, 142).Value = businessRow.BusRegOfGuarantor4;
+            ws.Cell(rowIndex, 143).Value = businessRow.G4Surname;
+            ws.Cell(rowIndex, 144).Value = businessRow.G4FirstName;
+            ws.Cell(rowIndex, 145).Value = businessRow.G4MiddleNames;
+            ws.Cell(rowIndex, 146).Value = businessRow.G4NatID;
+            ws.Cell(rowIndex, 147).Value = businessRow.G4VotID;
+            ws.Cell(rowIndex, 148).Value = businessRow.G4DrivLic;
+            ws.Cell(rowIndex, 149).Value = businessRow.G4PassNum;
+            ws.Cell(rowIndex, 150).Value = businessRow.G4SSN;
+            ws.Cell(rowIndex, 151).Value = businessRow.G4Gender;
+            ws.Cell(rowIndex, 152).Value = businessRow.G4DOB;
+            ws.Cell(rowIndex, 153).Value = businessRow.G4Add1;
+            ws.Cell(rowIndex, 154).Value = businessRow.G4Add2;
+            ws.Cell(rowIndex, 155).Value = businessRow.G4Add3;
+            ws.Cell(rowIndex, 156).Value = businessRow.G4HomeTel;
+            ws.Cell(rowIndex, 157).Value = businessRow.G4WorkTel;
+            ws.Cell(rowIndex, 158).Value = businessRow.G4Mobile;
+            ws.Cell(rowIndex, 159).Value = businessRow.Status;
+
+        }
+        else if (row is DBIndividualContext individualRow)
+        {
+            ws.Cell(rowIndex, 1).Value = "D";
+            ws.Cell(rowIndex, 2).Value = individualRow.CorrectionIndicator;
+            ws.Cell(rowIndex, 3).Value = individualRow.CreditFacilityAccNum;
+            ws.Cell(rowIndex, 4).Value = individualRow.CustomerID;
+            ws.Cell(rowIndex, 5).Value = individualRow.BranchCode;
+            ws.Cell(rowIndex, 6).Value = individualRow.NatIDNum;
+            ws.Cell(rowIndex, 7).Value = individualRow.VotersIDNum;
+            ws.Cell(rowIndex, 8).Value = individualRow.DriverLicNum;
+            ws.Cell(rowIndex, 9).Value = individualRow.PassportNum;
+            ws.Cell(rowIndex, 10).Value = individualRow.SSNum;
+            ws.Cell(rowIndex, 11).Value = individualRow.EzwichNum;
+            ws.Cell(rowIndex, 12).Value = individualRow.OtherIDNum;//otherIdNumb_otherIdType[0];
+            ws.Cell(rowIndex, 13).Value = individualRow.OtherIDType;//otherIdNumb_otherIdType[1];
+            ws.Cell(rowIndex, 14).Value = individualRow.TINum;
+            ws.Cell(rowIndex, 15).Value = individualRow.Gender;
+            ws.Cell(rowIndex, 16).Value = individualRow.MaritalStatus;
+            ws.Cell(rowIndex, 17).Value = individualRow.Nationality;
+            ws.Cell(rowIndex, 18).Value = individualRow.DateOfBirth;
+            ws.Cell(rowIndex, 19).Value = individualRow.Title;//_title;//stringHelper.NewFilterNameByTitle(individualRow.Title);//allNames[0];
+            ws.Cell(rowIndex, 20).Value = individualRow.Surname;
+            ws.Cell(rowIndex, 21).Value = individualRow.FirstName;
+            ws.Cell(rowIndex, 22).Value = individualRow.MiddleNames;
+            ws.Cell(rowIndex, 23).Value = individualRow.PreviousNames;
+            ws.Cell(rowIndex, 24).Value = individualRow.Alias;
+            ws.Cell(rowIndex, 25).Value = individualRow.ProofOfAddType; //proofOfAddType_proofOfAddNum[0];
+            ws.Cell(rowIndex, 26).Value = individualRow.ProofOfAddNum; //proofOfAddType_proofOfAddNum[1];
+            ws.Cell(rowIndex, 27).Value = individualRow.CurResAddr1;
+            ws.Cell(rowIndex, 28).Value = individualRow.CurResAddr2;
+            ws.Cell(rowIndex, 29).Value = individualRow.CurResAddr3;
+            ws.Cell(rowIndex, 30).Value = individualRow.CurResAddr4;
+            ws.Cell(rowIndex, 31).Value = individualRow.CurResAddrPostalCode;
+            ws.Cell(rowIndex, 32).Value = individualRow.DateMovedCurrRes;
+            ws.Cell(rowIndex, 33).Value = individualRow.PrevResAddr1;//PrevResAddr[0];
+            ws.Cell(rowIndex, 34).Value = individualRow.PrevResAddr2;//PrevResAddr[1];
+            ws.Cell(rowIndex, 35).Value = individualRow.PrevResAddr3;//PrevResAddr[2];
+            ws.Cell(rowIndex, 36).Value = individualRow.PrevResAddr4;//PrevResAddr[3];
+            ws.Cell(rowIndex, 37).Value = individualRow.PrevResAddrPostalCode;
+            ws.Cell(rowIndex, 38).Value = individualRow.OwnerOrTenant;
+            ws.Cell(rowIndex, 39).Value = individualRow.PostAddrLine1;//PostAddrLine[0];
+            ws.Cell(rowIndex, 40).Value = individualRow.PostAddrLine2;//PostAddrLine[1];
+            ws.Cell(rowIndex, 41).Value = individualRow.PostAddrLine3;//PostAddrLine[2];
+            ws.Cell(rowIndex, 42).Value = individualRow.PostAddrLine4;//PostAddrLine[3];
+            ws.Cell(rowIndex, 43).Value = individualRow.PostalAddPostCode;
+            ws.Cell(rowIndex, 44).Value = individualRow.EmailAddress;
+            ws.Cell(rowIndex, 45).Value = individualRow.HomeTel;
+            ws.Cell(rowIndex, 46).Value = individualRow.MobileTel1;
+            ws.Cell(rowIndex, 47).Value = individualRow.MobileTel2;
+            ws.Cell(rowIndex, 48).Value = individualRow.WorkTel;
+            ws.Cell(rowIndex, 49).Value = individualRow.NumOfDependants;
+            ws.Cell(rowIndex, 50).Value = individualRow.EmpType;
+            ws.Cell(rowIndex, 51).Value = individualRow.EmpPayrollNum;
+            ws.Cell(rowIndex, 52).Value = individualRow.Paypoint;
+            ws.Cell(rowIndex, 53).Value = individualRow.EmpName;
+            ws.Cell(rowIndex, 54).Value = individualRow.EmpAddr1;//EmpAddr[0];
+            ws.Cell(rowIndex, 55).Value = individualRow.EmpAddr2;//EmpAddr[1];
+            ws.Cell(rowIndex, 56).Value = individualRow.EmpAddr3;//EmpAddr[2];
+            ws.Cell(rowIndex, 57).Value = individualRow.EmpAddr4;//EmpAddr[3];
+            ws.Cell(rowIndex, 58).Value = individualRow.EmpAddrPostalCode;
+            ws.Cell(rowIndex, 59).Value = individualRow.DateOfEmp;
+            ws.Cell(rowIndex, 60).Value = individualRow.Occupation;
+            ws.Cell(rowIndex, 61).Value = individualRow.IncomeCurrency;  //incomeCurrency_Income_jointOrSoleAcc_NoParticipantsInAcc[0];
+            ws.Cell(rowIndex, 62).Value = individualRow.Income;  //incomeCurrency_Income_jointOrSoleAcc_NoParticipantsInAcc[1];
+            ws.Cell(rowIndex, 63).Value = individualRow.JointOrSoleAcc;  //incomeCurrency_Income_jointOrSoleAcc_NoParticipantsInAcc[2];
+            ws.Cell(rowIndex, 64).Value = individualRow.NoParticipantsInAcc;  //incomeCurrency_Income_jointOrSoleAcc_NoParticipantsInAcc[3];
+            ws.Cell(rowIndex, 65).Value = individualRow.OldCustomerID;
+            ws.Cell(rowIndex, 66).Value = individualRow.OldAccountNum;
+            ws.Cell(rowIndex, 67).Value = individualRow.OldSRN;
+            ws.Cell(rowIndex, 68).Value = individualRow.OldBranchCode;
+            ws.Cell(rowIndex, 69).Value = individualRow.CreditFacilityType;
+            ws.Cell(rowIndex, 70).Value = individualRow.PurposeOfFacility;
+            ws.Cell(rowIndex, 71).Value = individualRow.FacilityTerm;
+            ws.Cell(rowIndex, 72).Value = individualRow.DefPaymentStartDate;
+            ws.Cell(rowIndex, 73).Value = individualRow.AmountCurrency;
+            ws.Cell(rowIndex, 74).Value = individualRow.FacilityAmount;
+            ws.Cell(rowIndex, 75).Value = individualRow.DisbursementDate;
+            ws.Cell(rowIndex, 76).Value = individualRow.DisbursementAmt;
+            ws.Cell(rowIndex, 77).Value = individualRow.MaturityDate;
+            ws.Cell(rowIndex, 78).Value = individualRow.SchdInstalAmount;
+            ws.Cell(rowIndex, 79).Value = individualRow.RepaymentFreq;
+            ws.Cell(rowIndex, 80).Value = individualRow.LastPaymentAmount;
+            ws.Cell(rowIndex, 81).Value = individualRow.LastPaymentDate;
+            ws.Cell(rowIndex, 82).Value = individualRow.NextPaymentDate;
+            ws.Cell(rowIndex, 83).Value = individualRow.CurBal;//CurBal0_AmtOverdue1_WOffAmount2_NDIA3_Fsc4[0];//individualRow.CurBal;
+            ws.Cell(rowIndex, 84).Value = individualRow.CurBalIndicator;
+            ws.Cell(rowIndex, 85).Value = individualRow.AssetClassification;
+            ws.Cell(rowIndex, 86).Value = individualRow.AmountInArrears; //CurBal0_AmtOverdue1_WOffAmount2_NDIA3_Fsc4[1];//individualRow.AmountInArrears;//AmountInArrears
+            ws.Cell(rowIndex, 87).Value = individualRow.ArrearsStartDate;
+            //3---------individualRow.NDIA;
+            ws.Cell(rowIndex, 88).Value = individualRow.NDIA;//individualRow.NDIA;
+            ws.Cell(rowIndex, 89).Value = individualRow.PaymentHistoryProfile;
+            ws.Cell(rowIndex, 90).Value = individualRow.AmtOverdue1to30days;
+            ws.Cell(rowIndex, 91).Value = individualRow.AmtOverdue31to60days;
+            ws.Cell(rowIndex, 92).Value = individualRow.AmtOverdue61to90days;
+            ws.Cell(rowIndex, 93).Value = individualRow.AmtOverdue91to120days;
+            ws.Cell(rowIndex, 94).Value = individualRow.AmtOverdue121to150days;
+            ws.Cell(rowIndex, 95).Value = individualRow.AmtOverdue151to180days;
+            ws.Cell(rowIndex, 96).Value = individualRow.AmtOverdue181orMore;
+            ws.Cell(rowIndex, 97).Value = individualRow.LegalFlag;
+            ws.Cell(rowIndex, 98).Value = individualRow.FacilityStatusCode; ;//individualRow.FacilityStatusCode;
+            ws.Cell(rowIndex, 99).Value = individualRow.FacilityStatusDate;//"";//_FacilityStatusDate;
+            ws.Cell(rowIndex, 100).Value = individualRow.ClosedDate;
+            ws.Cell(rowIndex, 101).Value = individualRow.ClosureReason;
+            ws.Cell(rowIndex, 102).Value = individualRow.WrittenOffAmt;//CurBal0_AmtOverdue1_WOffAmount2_NDIA3_Fsc4[2];//individualRow.WrittenOffAmt;
+            ws.Cell(rowIndex, 103).Value = individualRow.ReasonForWrittenOff;
+            ws.Cell(rowIndex, 104).Value = individualRow.DateRestructured;
+            ws.Cell(rowIndex, 105).Value = individualRow.ReasonForRestructure;
+            ws.Cell(rowIndex, 106).Value = individualRow.CreditCollateralInd;
+            ws.Cell(rowIndex, 107).Value = individualRow.SecurityType;
+            ws.Cell(rowIndex, 108).Value = individualRow.NatureOfCharge;
+            ws.Cell(rowIndex, 109).Value = individualRow.SecurityValue;
+            ws.Cell(rowIndex, 110).Value = individualRow.CollRegRefNum;
+            ws.Cell(rowIndex, 111).Value = individualRow.SpecialCommentsCode;
+            ws.Cell(rowIndex, 112).Value = individualRow.NatureOfGuarantor;
+            ws.Cell(rowIndex, 113).Value = individualRow.NameOfComGuarantor;
+            ws.Cell(rowIndex, 114).Value = individualRow.BusRegOfGuarantor;
+            ws.Cell(rowIndex, 115).Value = individualRow.G1Surname;
+            ws.Cell(rowIndex, 116).Value = individualRow.G1FirstName;
+            ws.Cell(rowIndex, 117).Value = individualRow.G1MiddleNames;
+            ws.Cell(rowIndex, 118).Value = individualRow.G1NatID;
+            ws.Cell(rowIndex, 119).Value = individualRow.G1VotID;
+            ws.Cell(rowIndex, 120).Value = individualRow.G1DrivLic;
+            ws.Cell(rowIndex, 121).Value = individualRow.G1PassNum;
+            ws.Cell(rowIndex, 122).Value = individualRow.G1SSN;
+            ws.Cell(rowIndex, 123).Value = individualRow.G1Gender;
+            ws.Cell(rowIndex, 124).Value = individualRow.G1DOB;
+            ws.Cell(rowIndex, 125).Value = individualRow.G1Add1;
+            ws.Cell(rowIndex, 126).Value = individualRow.G1Add2;
+            ws.Cell(rowIndex, 127).Value = individualRow.G1Add3;
+            ws.Cell(rowIndex, 128).Value = individualRow.G1HomeTel;
+            ws.Cell(rowIndex, 129).Value = individualRow.G1WorkTel;
+            ws.Cell(rowIndex, 130).Value = individualRow.G1Mobile;
+            ws.Cell(rowIndex, 131).Value = individualRow.G2Surname;
+            ws.Cell(rowIndex, 132).Value = individualRow.G2FirstName;
+            ws.Cell(rowIndex, 133).Value = individualRow.G2MiddleNames;
+            ws.Cell(rowIndex, 134).Value = individualRow.G2NatID;
+            ws.Cell(rowIndex, 135).Value = individualRow.G2VotID;
+            ws.Cell(rowIndex, 136).Value = individualRow.G2DrivLic;
+            ws.Cell(rowIndex, 137).Value = individualRow.G2PassNum;
+            ws.Cell(rowIndex, 138).Value = individualRow.G2SSN;
+            ws.Cell(rowIndex, 139).Value = individualRow.G2Gender;
+            ws.Cell(rowIndex, 140).Value = individualRow.G2DOB;
+            ws.Cell(rowIndex, 141).Value = individualRow.G2Add1;
+            ws.Cell(rowIndex, 142).Value = individualRow.G2Add2;
+            ws.Cell(rowIndex, 143).Value = individualRow.G2Add3;
+            ws.Cell(rowIndex, 144).Value = individualRow.G2HomeTel;
+            ws.Cell(rowIndex, 145).Value = individualRow.G2WorkTel;
+            ws.Cell(rowIndex, 146).Value = individualRow.G2Mobile;
+            ws.Cell(rowIndex, 147).Value = individualRow.G3Surname;
+            ws.Cell(rowIndex, 148).Value = individualRow.G3FirstName;
+            ws.Cell(rowIndex, 149).Value = individualRow.G3MiddleNames;
+            ws.Cell(rowIndex, 150).Value = individualRow.G3NatID;
+            ws.Cell(rowIndex, 151).Value = individualRow.G3VotID;
+            ws.Cell(rowIndex, 152).Value = individualRow.G3DrivLic;
+            ws.Cell(rowIndex, 153).Value = individualRow.G3PassNum;
+            ws.Cell(rowIndex, 154).Value = individualRow.G3SSN;
+            ws.Cell(rowIndex, 155).Value = individualRow.G3Gender;
+            ws.Cell(rowIndex, 156).Value = individualRow.G3DOB;
+            ws.Cell(rowIndex, 157).Value = individualRow.G3Add1;
+            ws.Cell(rowIndex, 158).Value = individualRow.G3Add2;
+            ws.Cell(rowIndex, 159).Value = individualRow.G3Add3;
+            ws.Cell(rowIndex, 160).Value = individualRow.G3HomeTel;
+            ws.Cell(rowIndex, 161).Value = individualRow.G3WorkTel;
+            ws.Cell(rowIndex, 162).Value = individualRow.G3Mobile;
+            ws.Cell(rowIndex, 163).Value = individualRow.G4Surname;
+            ws.Cell(rowIndex, 164).Value = individualRow.G4FirstName;
+            ws.Cell(rowIndex, 165).Value = individualRow.G4MiddleNames;
+            ws.Cell(rowIndex, 166).Value = individualRow.G4NatID;
+            ws.Cell(rowIndex, 167).Value = individualRow.G4VotID;
+            ws.Cell(rowIndex, 168).Value = individualRow.G4DrivLic;
+            ws.Cell(rowIndex, 169).Value = individualRow.G4PassNum;
+            ws.Cell(rowIndex, 170).Value = individualRow.G4SSN;
+            ws.Cell(rowIndex, 171).Value = individualRow.G4Gender;
+            ws.Cell(rowIndex, 172).Value = individualRow.G4DOB;
+            ws.Cell(rowIndex, 173).Value = individualRow.G4Add1;
+            ws.Cell(rowIndex, 174).Value = individualRow.G4Add2;
+            ws.Cell(rowIndex, 175).Value = individualRow.G4Add3;
+            ws.Cell(rowIndex, 176).Value = individualRow.G4HomeTel;
+            ws.Cell(rowIndex, 177).Value = individualRow.G4WorkTel;
+            ws.Cell(rowIndex, 178).Value = individualRow.G4Mobile;
+            ws.Cell(rowIndex, 179).Value = individualRow.Status;
+        }
+        rowIndex++;
+    }
+    public static bool REF_AreAllItemsAvailable(List<string> fileNamesToCheck, List<string> AcceptedFiles)
+    {
+        if (fileNamesToCheck == null || AcceptedFiles == null)
+            return false;
+
+        var availableSet = new HashSet<string>(AcceptedFiles);
+
+        foreach (var item in fileNamesToCheck)
+        {
+            if (!availableSet.Contains(item))
+                return false;
+        }
+
+        return true;
+    }
+    // public async Task<bool> REF_CheckFileNamesAllowed(IBrowserFile ibrowserFile)
+    // {
+    //     string fileFirstPart = ibrowserFile.Name.Split('_').FirstOrDefault();
+    //     string ibrowserFileName = stringHelper.GetFirstPartExcludeLastPart(fileFirstPart, 4);
+    //     return allowedFileNames.Contains(ibrowserFileName.ToUpper());
+    // }
+    public List<DBIndividualContext> REF_MainMatcherTransformer(List<IndividualRef> savedDatafromOurDatabase, List<DBIndividualContext> recordFromClient)
+    {
+        foreach (var clientRecord in recordFromClient)
+        {
+            var matchingSavedRecord = savedDatafromOurDatabase.FirstOrDefault(saved => saved.CreditFacilityAccNum == clientRecord.CreditFacilityAccNum && saved.CustomerID == clientRecord.CustomerID && saved.DisbursementDate == clientRecord.DisbursementDate);
+
+            if (matchingSavedRecord == null)
+            {
+                clientRecord.Status = string.Empty;
+            }
+            else
+            {
+                // Compare DateOfBirth
+                if (matchingSavedRecord.DateOfBirth == clientRecord.DateOfBirth)
+                {
+                    clientRecord.Status = string.Empty;
+                }
+                else
+                {
+                    clientRecord.Status = "DOB";
+                }
+            }
+        }
+        //DOB
+
+        return recordFromClient;  // Return categorized records
+    }
+    public string REF_GetNameFromFile(string theFilename)
+    {
+        string fileFirstPart = theFilename.Split('_').FirstOrDefault();
+        string ibrowserFileName = stringHelper.GetFirstPartExcludeLastPart(fileFirstPart, 4);
+        return ibrowserFileName;
+    }
+    public bool REF_IsDateOfBirtWrong<T>(T context) where T : class
+    {
+        if (typeof(T) == typeof(DBBusinessContext))
+        {
+            var bc = context as DBBusinessContext;
+            if (string.IsNullOrWhiteSpace(bc.Status))
+            {
+                return true;
+            }
+        }
+        else if (typeof(T) == typeof(DBIndividualContext))
+        {
+            var ic = context as DBIndividualContext;
+            if (string.IsNullOrWhiteSpace(ic.Status))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+
+

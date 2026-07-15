@@ -1,0 +1,180 @@
+﻿@page "/Manageroles"
+@using Microsoft.EntityFrameworkCore
+@rendermode InteractiveServer
+@inject DataManagementService DataManagementService
+@inject IDialogService DialogService
+@inject UserManager<ApplicationUser> UserManager
+
+
+
+@using System.ComponentModel.DataAnnotations
+@using System.Text
+@using System.Text.Encodings.Web
+@using ICleanserBlazorUI.Interface
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using CleanserBlazorUI.Data
+
+
+
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IUserStore<ApplicationUser> UserStore
+@inject SignInManager<ApplicationUser> SignInManager
+@inject NavigationManager NavigationManager
+@inject IdentityRedirectManager RedirectManager
+@inject ICustomEmailSender EmailSender
+
+
+
+@attribute [Authorize(Roles = "admin")]
+<StatusMessage Message="@Message" />
+<EditForm Model="Input" asp-route-returnUrl="@ReturnUrl" method="post" OnValidSubmit="RegisterUser" FormName="register">
+    <DataAnnotationsValidator />
+    <MudText Typo="Typo.h6"><b>EDIT ROLE</b></MudText>
+    <hr style="width: 535px" />
+    <div class="py-3 bg-transparent"></div>
+    <ValidationSummary class="text-danger" role="alert" />
+
+    <!-- Email Field -->
+    <div>
+        <label>
+            <InputText placeholder="example@xdsdata.com" disabled="@isDisabled" @bind-Value="Input.Email" class="form-control py-4" style="width: 535px" aria-required="true" />
+        </label>
+    </div>
+    <div class="py-2 bg-transparent"></div>
+    <div>
+        <label>
+            <InputText @bind-Value="Input.NewUserRoles" class="form-control py-4" style="width: 535px" autocomplete="role" aria-required="true" placeholder="admin, manager, superuser, user" />
+            <ValidationMessage For="() => Input.NewUserRoles" class="text-danger" />
+        </label>
+    </div>
+    <div class="py-2 bg-transparent"></div>
+
+    <!-- Register Button -->
+    <button class="py-3 btn btn-primary" type="submit" style="width: 535px;">Update Role</button>
+    <div class="py-3 bg-transparent"></div>
+</EditForm>
+@foreach (var bs in usersWithRoles)
+{
+
+    <MudGrid Style="min-width: 100%">
+        <MudItem lg="11">
+            @if (bs.Email == "noreply.xdsmonitor@xdsdatagh.com")
+            {
+                @if (bs.Roles.Count > 0)
+                {
+                    <MudButton Disabled="true" OnClick="@(() => DeleteUser(bs))" Color="Color.Error" Icon="@Icons.Material.Filled.Edit">DELETE</MudButton>
+                    <MudButton Disabled="true" OnClick="@(() => EditUser(bs))" Color="Color.Success" Icon="@Icons.Material.Filled.Delete">EDIT</MudButton>
+                    <MudButton Variant="Variant.Text">@bs.Email</MudButton>
+                    <MudButton>@bs.Roles[0]</MudButton>
+                }
+            }else
+            {
+                @if (bs.Roles.Count > 0)
+                {
+                    <MudButton OnClick="@(() => DeleteUser(bs))" Color="Color.Error" Icon="@Icons.Material.Filled.Edit">DELETE</MudButton>
+                    <MudButton OnClick="@(() => EditUser(bs))" Color="Color.Success" Icon="@Icons.Material.Filled.Delete">EDIT</MudButton>
+                    <MudButton Variant="Variant.Text">@bs.Email</MudButton>
+                    <MudButton>@bs.Roles[0]</MudButton>
+                }
+            }
+        </MudItem>
+    </MudGrid>
+
+}
+@code {
+    private bool isDisabled = true; // Initially disabled
+    private IEnumerable<IdentityError>? identityErrors;
+    [SupplyParameterFromForm] private InputModel Input { get; set; } = new();
+    [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+    private string? Message => identityErrors is null ? null : $"Error: {string.Join(", ", identityErrors.Select(error => error.Description))}";
+    List<UserWithRoles> usersWithRoles = new();
+    protected override async Task OnInitializedAsync()
+    {
+        usersWithRoles.Clear();
+        usersWithRoles = await LoadUsersWithRoles();
+        await InvokeAsync(StateHasChanged);
+    }
+    private async Task<List<UserWithRoles>> LoadUsersWithRoles()
+    {
+        var users = await UserManager.Users.ToListAsync();
+
+        foreach (var user in users)
+        {
+            var roles = await UserManager.GetRolesAsync(user);
+            usersWithRoles.Add(new UserWithRoles
+            {
+                Email = user.Email,
+                Roles = roles.ToList()
+            });
+        }
+        return usersWithRoles;
+    }
+    private async Task EditUser(UserWithRoles user)
+    {
+        Input.Email = user.Email;
+        if (user.Roles.Count > 0)
+        {
+            Input.NewUserRoles = user.Roles[0];
+            await InvokeAsync(StateHasChanged);
+        }
+
+    }
+    private async Task DeleteUser(UserWithRoles user)
+    {
+        var identityUser = await UserManager.FindByNameAsync(user.Email);
+        if (identityUser != null && identityUser.Email != "noreply.xdsmonitor@xdsdatagh.com")
+        {
+            await UserManager.DeleteAsync(identityUser);
+        }
+        usersWithRoles.Clear();
+        usersWithRoles = await LoadUsersWithRoles();
+        await InvokeAsync(StateHasChanged);
+    }
+    public async Task RegisterUser(EditContext editContext)
+    {
+        var userByEmail = await UserManager.FindByEmailAsync(Input.Email);
+        if (userByEmail != null)
+        {
+            var resultRoles = await UserManager.GetRolesAsync(userByEmail);
+            var roleRemover = await UserManager.RemoveFromRolesAsync(userByEmail, resultRoles);
+            if (!roleRemover.Succeeded)
+            {
+                throw new InvalidOperationException("Failed to revoke roles.");
+            }
+            else
+            {
+                await UserManager.AddToRoleAsync(userByEmail, Input.NewUserRoles);
+            }
+        }
+        usersWithRoles.Clear();
+        usersWithRoles = await LoadUsersWithRoles();
+        Input = new();
+        await InvokeAsync(StateHasChanged);
+    }
+    public bool IsAllowedWord(string input, params string[] allowedWords)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return false; // Input is null or empty
+        }
+
+        return allowedWords.Contains(input, StringComparer.OrdinalIgnoreCase);
+    }
+    private sealed class InputModel
+    {
+        [Display(Name = "Email")]
+        public string Email { get; set; } = "";
+
+        [Required]
+        [Display(Name = "Role")]
+        [AllowedWordsAttribute("admin", "manager", "superuser", "user")]
+        public string NewUserRoles { get; set; } = "";
+    }
+    public class UserWithRoles
+    {
+        public string Email { get; set; }
+        public List<string> Roles { get; set; }
+    }
+}
