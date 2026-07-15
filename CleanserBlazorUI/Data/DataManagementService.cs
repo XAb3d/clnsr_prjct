@@ -40,7 +40,7 @@ public class DataManagementService
     // - Absent records → left as-is (historical, never deleted)
     // Returns changelog: every (AccNum, CustomerID, DisbDate, FieldName) enriched this run.
     public async Task<List<(string AccNum, string CustomerID, string DisbDate, string FieldAdded)>>
-        SaveExcelDataToDatabaseInd(IEnumerable<IndividualContext> dataFromExcel, string fileShortName)
+        SaveExcelDataToDatabaseInd(IEnumerable<DBIndividualContext> dataFromExcel, string fileShortName)
     {
         var subscriber = await GetFileShortCodeFromFileName(fileShortName);
         var now        = DateTime.Now;
@@ -60,22 +60,22 @@ public class DataManagementService
 
         foreach (var item in dataFromExcel)
         {
-            var key = (Norm(item.CreditFacilityAccNum?.Data),
-                       Norm(item.CustomerID?.Data),
-                       Norm(item.DisbursementDate?.Data));
+            var key = (Norm(item.CreditFacilityAccNum),
+                       Norm(item.CustomerID),
+                       Norm(item.DisbursementDate));
 
             if (existingIndex.TryGetValue(key, out var dbRow))
             {
                 bool changed = false;
-                changed |= EnrichField(ref dbRow.NatIDNum,     item.NatIDNum?.Data,     "NatIDNum",     key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.VotersIDNum,  item.VotersIDNum?.Data,  "VotersIDNum",  key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.DriverLicNum, item.DriverLicNum?.Data, "DriverLicNum", key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.PassportNum,  item.PassportNum?.Data,  "PassportNum",  key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.SSNum,        item.SSNum?.Data,        "SSNum",        key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.EzwichNum,    item.EzwichNum?.Data,    "EzwichNum",    key.Item1, key.Item2, key.Item3, changelog);
-                changed |= EnrichField(ref dbRow.OtherIDNum,   item.OtherIDNum?.Data,   "OtherIDNum",   key.Item1, key.Item2, key.Item3, changelog);
-                if (!string.IsNullOrWhiteSpace(item.DateOfBirth?.Data))
-                    dbRow.DateOfBirth = item.DateOfBirth.Data;
+                changed |= EnrichField(ref dbRow.NatIDNum,     item.NatIDNum,     "NatIDNum",     key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.VotersIDNum,  item.VotersIDNum,  "VotersIDNum",  key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.DriverLicNum, item.DriverLicNum, "DriverLicNum", key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.PassportNum,  item.PassportNum,  "PassportNum",  key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.SSNum,        item.SSNum,        "SSNum",        key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.EzwichNum,    item.EzwichNum,    "EzwichNum",    key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.OtherIDNum,   item.OtherIDNum,   "OtherIDNum",   key.Item1, key.Item2, key.Item3, changelog);
+                if (!string.IsNullOrWhiteSpace(item.DateOfBirth))
+                    dbRow.DateOfBirth = item.DateOfBirth;
                 if (changed) { dbRow.LastUpdatedDate = now; toUpdate.Add(dbRow); }
             }
             else
@@ -83,17 +83,17 @@ public class DataManagementService
                 toInsert.Add(new IndividualRef
                 {
                     SubscriberCode       = subscriber,
-                    CreditFacilityAccNum = item.CreditFacilityAccNum?.Data ?? string.Empty,
-                    CustomerID           = item.CustomerID?.Data            ?? string.Empty,
-                    DisbursementDate     = item.DisbursementDate?.Data      ?? string.Empty,
-                    DateOfBirth          = item.DateOfBirth?.Data           ?? string.Empty,
-                    NatIDNum             = item.NatIDNum?.Data              ?? string.Empty,
-                    VotersIDNum          = item.VotersIDNum?.Data           ?? string.Empty,
-                    DriverLicNum         = item.DriverLicNum?.Data          ?? string.Empty,
-                    PassportNum          = item.PassportNum?.Data           ?? string.Empty,
-                    SSNum                = item.SSNum?.Data                 ?? string.Empty,
-                    EzwichNum            = item.EzwichNum?.Data             ?? string.Empty,
-                    OtherIDNum           = item.OtherIDNum?.Data            ?? string.Empty,
+                    CreditFacilityAccNum = item.CreditFacilityAccNum        ?? string.Empty,
+                    CustomerID           = item.CustomerID                  ?? string.Empty,
+                    DisbursementDate     = item.DisbursementDate             ?? string.Empty,
+                    DateOfBirth          = item.DateOfBirth                  ?? string.Empty,
+                    NatIDNum             = item.NatIDNum                    ?? string.Empty,
+                    VotersIDNum          = item.VotersIDNum                 ?? string.Empty,
+                    DriverLicNum         = item.DriverLicNum                ?? string.Empty,
+                    PassportNum          = item.PassportNum                 ?? string.Empty,
+                    SSNum                = item.SSNum                       ?? string.Empty,
+                    EzwichNum            = item.EzwichNum                   ?? string.Empty,
+                    OtherIDNum           = item.OtherIDNum                  ?? string.Empty,
                     CurrenVersion        = 1,
                     CreatedDate          = now,
                     LastUpdatedDate      = now
@@ -108,6 +108,28 @@ public class DataManagementService
             await _context.BulkUpdateAsync(toUpdate, new BulkConfig { BatchSize = 4000 });
 
         return changelog;
+    }
+
+
+    // ── Overload for CLEAN path — accepts IndividualContext (has .Data properties) ─
+    public async Task<List<(string AccNum, string CustomerID, string DisbDate, string FieldAdded)>>
+        SaveExcelDataToDatabaseInd(IEnumerable<IndividualContext> dataFromExcel, string fileShortName)
+    {
+        var mapped = dataFromExcel.Select(r => new DBIndividualContext
+        {
+            CreditFacilityAccNum = r.CreditFacilityAccNum?.Data ?? string.Empty,
+            CustomerID           = r.CustomerID?.Data           ?? string.Empty,
+            DisbursementDate     = r.DisbursementDate?.Data     ?? string.Empty,
+            DateOfBirth          = r.DateOfBirth?.Data          ?? string.Empty,
+            NatIDNum             = r.NatIDNum?.Data             ?? string.Empty,
+            VotersIDNum          = r.VotersIDNum?.Data          ?? string.Empty,
+            DriverLicNum         = r.DriverLicNum?.Data         ?? string.Empty,
+            PassportNum          = r.PassportNum?.Data          ?? string.Empty,
+            SSNum                = r.SSNum?.Data                ?? string.Empty,
+            EzwichNum            = r.EzwichNum?.Data            ?? string.Empty,
+            OtherIDNum           = r.OtherIDNum?.Data           ?? string.Empty,
+        });
+        return await SaveExcelDataToDatabaseInd(mapped, fileShortName);
     }
 
     // ── BUS Upsert ────────────────────────────────────────────────────────────

@@ -359,7 +359,7 @@
                         AlertSeverityVisible = "d-block";
                         // Persist REF file to DB (upsert — new records inserted, existing enriched)
                         var refChangelogInd = await DataManagementService.SaveExcelDataToDatabaseInd(
-                            ExcelDataRecieved.Select(r => MapDBIndividualContextToIndividualContext(r)), filename);
+                            ExcelDataRecieved, filename);
                         StateHasChanged();
                         var RefData = await DataManagementService.GETReferenceData_IND(filename);
                         var (mainMatcherTransformer, _correctDateOfBirth, _dobIssues, _matchdata) = REF_MainMatcherTransformer_IND(RefData, ExcelDataRecieved);
@@ -2045,6 +2045,8 @@
 
         return list;
     }
+
+    string NormalizeDate(string dob)
     {
         if (string.IsNullOrWhiteSpace(dob))
             return string.Empty;
