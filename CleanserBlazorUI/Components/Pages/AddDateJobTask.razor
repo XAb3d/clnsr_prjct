@@ -1,0 +1,48 @@
+﻿@page "/schedule-automatic-cleanup"
+
+@rendermode InteractiveServer
+@using CleanserBlazorUI.Data
+
+@inject FileCleanupSettingsService SettingsService
+
+
+<AuthorizeView Roles="admin">
+    <MudNumericField T="int" Label="Start Hour (0-23)" @bind-Value="StartHour" Min="0" Max="23" />
+    <MudNumericField T="int" Label="End Hour (1-24)" @bind-Value="EndHour" Min="1" Max="24" />
+    <h1></h1>
+    <MudButton Disabled="@_processing" OnClick="OpenCleanupSettingsDialog" Variant="Variant.Filled" Color="Color.Primary" Style="width: 250px">
+        @if (_processing)
+        {
+            <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+            <MudText Class="ms-2">Saving</MudText>
+        }
+        else
+        {
+            <MudText>Save Changes</MudText>
+        }
+    </MudButton>
+</AuthorizeView>
+@code {
+    public int StartHour { get; set; }
+    public int EndHour { get; set; }
+    [Inject] IDialogService DialogService { get; set; }
+    private bool _processing = false;
+
+    protected override void OnInitialized()
+    {
+        var settings = SettingsService.GetSettings();
+        StartHour = settings.StartHour;
+        EndHour = settings.EndHour;
+    }
+
+    private async Task OpenCleanupSettingsDialog()
+    {
+        _processing = true;
+        FileCleanupSettings fileCleanupSettings = new();
+        fileCleanupSettings.StartHour = StartHour;
+        fileCleanupSettings.EndHour = EndHour;
+        SettingsService.SaveSettings(fileCleanupSettings);
+        await Task.Delay(2000);
+        _processing = false;
+    }
+}

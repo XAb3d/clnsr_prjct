@@ -1,0 +1,80 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject NavigationManager NavigationManager
+
+<MudThemeProvider @bind-IsDarkMode="@IsDark" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudAppBar Fixed="true" Dense="false" Elevation="25" Style="@($"color:{Colors.LightGreen.Accent3}; background:{Colors.BlueGray.Darken4};")">
+    <MudLink Href="/">
+        <MudImage Style="@($"color:{Colors.LightGreen.Accent3}; padding-block: 10px; padding: 5px; background:{Colors.BlueGray.Darken4};")" Src="logocolor.png" Height="55" Width="110"></MudImage>
+    </MudLink>
+
+    <MudSpacer />
+    <AuthorizeView>
+        <Authorized>
+
+            <MudLink class="nav-link" href="Account/Manage">
+                <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> @context.User.Identity?.Name
+            </MudLink>
+            <div class="nav-item px-3">
+                <form action="Account/Logout" method="post">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="ReturnUrl" value="@currentUrl" />
+                    <button type="submit" class="nav-link">
+                        <span class="bi bi-arrow-bar-left-nav-menu" aria-hidden="true"></span> Logout
+                    </button>
+                </form>
+            </div>
+        </Authorized>
+        <NotAuthorized>
+            <MudButton Href="Account/Login" Color="Color.Primary" Variant="Variant.Filled">Login</MudButton>
+        </NotAuthorized>
+    </AuthorizeView>
+</MudAppBar>
+
+<MudMainContent Style="background-color: #001D23; overflow: hidden;">
+    <MudContainer Style="min-height: 100vh; background-color: #001D23; overflow-y: hidden;" MaxWidth="MaxWidth.ExtraExtraLarge" Class="my-sample-main-content-container my-4 pt-4">
+        @Body
+        <MudAppBar Bottom="true" Fixed="true" Dense="@true" Elevation="24" Style="@($"color:{Colors.LightGreen.Accent3}; background:{Colors.BlueGray.Darken4}; width: 100%; padding-top: 10px")">
+            <MudSpacer></MudSpacer>
+            <MudPaper Elevation="0" style="background-color: transparent">
+                <div>
+                    Cleanser © @DateTime.Now.Year.ToString() <strong>Xds Data</strong>. All rights reserved.
+                    <a href="/privacy-policy" style="color: #007bff; text-decoration: none;">Privacy Policy</a> |
+                    <a href="/terms-of-service" style="color: #007bff; text-decoration: none;">Terms of Service</a> |
+                    <a href="/cookie-policy" style="color: #007bff; text-decoration: none;">Cookie Policy</a>
+                </div>
+            </MudPaper>
+        </MudAppBar>
+    </MudContainer>
+</MudMainContent>
+
+<div id="blazor-error-ui">
+    <a class="dismiss">🗙</a>
+</div>
+
+@code {
+    public bool IsDark { get; set; } = true;
+
+    private string? currentUrl;
+
+    protected override void OnInitialized()
+    {
+        currentUrl = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        currentUrl = NavigationManager.ToBaseRelativePath(e.Location);
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

@@ -1,0 +1,239 @@
+﻿@page "/Account/Register"
+
+@using System.ComponentModel.DataAnnotations
+@using System.Text
+@using System.Text.Encodings.Web
+@using ICleanserBlazorUI.Interface
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using CleanserBlazorUI.Data
+
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IUserStore<ApplicationUser> UserStore
+@inject SignInManager<ApplicationUser> SignInManager
+@* @inject IEmailSender<ApplicationUser> EmailSender *@
+@inject ILogger<Register> Logger
+@inject NavigationManager NavigationManager
+@inject IdentityRedirectManager RedirectManager
+@inject ICustomEmailSender EmailSender
+
+
+@attribute [Authorize(Roles = "admin, superuser")]
+@* @attribute [Authorize] *@
+<MudPaper Style="@($"min-height: 100vh; overflow: hidden; display: flex; background:{Colors.BlueGray.Darken4};")">
+    <!-- Left Column -->
+    <div style="flex: 1; display: flex; justify-content: center; align-items: center; padding: 20px;">
+        <div style="width: 55%; border-radius: 8px; padding: 20px;">
+            <StatusMessage Message="@Message" />
+            <EditForm Model="Input" asp-route-returnUrl="@ReturnUrl" method="post" OnValidSubmit="RegisterUser" FormName="register">
+                <DataAnnotationsValidator />
+                <MudText Typo="Typo.h4"><b>CREATE A NEW ACCOUNT</b></MudText>
+                <hr style="width: 535px" />
+                <div class="py-3 bg-transparent"></div>
+                <ValidationSummary class="text-danger" role="alert" />
+
+                <!-- Email Field -->
+                <div>
+                    <label>
+                        <InputText @bind-Value="Input.Email" class="form-control py-4" style="width: 535px" autocomplete="username" aria-required="true" placeholder="name@example.com" />
+                        <ValidationMessage For="() => Input.Email" class="text-danger" />
+                    </label>
+                </div>
+                <div class="py-2 bg-transparent"></div>
+                <div>
+                    <label>
+                        <InputText @bind-Value="Input.NewUserRoles" class="form-control py-4" style="width: 535px" autocomplete="role" aria-required="true" placeholder="admin, manager, superuser, user" />
+                        <ValidationMessage For="() => Input.NewUserRoles" class="text-danger" />
+                    </label>
+                </div>
+                <div class="py-2 bg-transparent"></div>
+
+                <!-- Password Field -->
+                <div>
+                    <label>
+                        <InputText type="password" @bind-Value="Input.Password" class="form-control py-4" style="width: 535px" autocomplete="new-password" aria-required="true" placeholder="password" />
+                        <ValidationMessage For="() => Input.Password" class="text-danger" />
+                    </label>
+                </div>
+                <div class="py-2 bg-transparent"></div>
+
+                <!-- Confirm Password Field -->
+                <div>
+                    <label>
+                        <InputText type="password" @bind-Value="Input.ConfirmPassword" class="form-control py-4" style="width: 535px" autocomplete="new-password" aria-required="true" placeholder="confirm password" />
+                        <ValidationMessage For="() => Input.ConfirmPassword" class="text-danger" />
+                    </label>
+                </div>
+
+                <div class="py-2 bg-transparent"></div>
+
+                <!-- Register Button -->
+                <button class="py-3 btn btn-primary" type="submit" style="width: 535px;">Register</button>
+                <div class="py-3 bg-transparent"></div>
+
+                <!-- Login Link -->
+                <div style="width: 100%; justify-items: center; justify-content:center">
+                    <p>
+                        <MudLink Color="Color.Primary" href="@(NavigationManager.GetUriWithQueryParameters("Account/Login", new Dictionary<string, object?> { ["ReturnUrl"] = ReturnUrl }))">
+                            Already have an account? Log in
+                        </MudLink>
+                    </p>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+
+    <!-- Right Column -->
+    <MudPaper Style="@($"color:{Colors.LightGreen.Accent3}; flex: 1; background-color: #f4f4f4; display: flex; justify-content: center; align-items: center background:{Colors.BlueGray.Darken4}; width: 100%;")">
+        <!-- Leave this empty for future content or image -->
+    </MudPaper>
+</MudPaper>
+
+
+@code {
+
+    private IEnumerable<IdentityError>? identityErrors;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = new();
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+
+    private string? Message => identityErrors is null ? null : $"Error: {string.Join(", ", identityErrors.Select(error => error.Description))}";
+
+    public async Task RegisterUser(EditContext editContext)
+    {
+        var user = CreateUser();
+        await UserStore.SetUserNameAsync(user, Input.Email, CancellationToken.None);
+        var emailStore = GetEmailStore();
+        await emailStore.SetEmailAsync(user, Input.Email, CancellationToken.None);
+        user.EmailConfirmed = true;
+        var result = await UserManager.CreateAsync(user, Input.Password);
+
+        var _useremail = Input.Email;
+        if (!result.Succeeded)
+        {
+            identityErrors = result.Errors;
+            Logger.LogError("Failed to create new account for user '{Email}': {Errors}", Input.Email, string.Join(", ", result.Errors.Select(e => e.Description)));
+            return;
+        }
+        else
+        {
+            var getNewlycreateduser = await UserManager.FindByEmailAsync(_useremail);
+            var roleResult = await UserManager.AddToRoleAsync(getNewlycreateduser, "MustChangePassword");
+            if (roleResult.Succeeded)
+            {
+                Logger.LogInformation("Added 'MustChangePassword' role to newly created user '{Email}'.", Input.Email);
+            }
+            else
+            {
+                Logger.LogError("Failed to add 'MustChangePassword' role to newly created user '{Email}': {Errors}", Input.Email, string.Join(", ", roleResult.Errors.Select(e => e.Description)));
+            }
+        }
+
+        Logger.LogInformation("User '{Email}' created a new account with password.", Input.Email);
+
+        var userId = await UserManager.GetUserIdAsync(user);
+        var code = await UserManager.GenerateEmailConfirmationTokenAsync(user);
+        code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
+        var callbackUrl = NavigationManager.BaseUri + "Account/Login";
+        await EmailSender.SendEmailAsync(user.Email, $"Cleanser Account Registration_{Input.Password}", callbackUrl);
+        Logger.LogInformation("Registration email sent to user '{Email}'.", Input.Email);
+
+        if (UserManager.Options.SignIn.RequireConfirmedAccount)
+        {
+            RedirectManager.RedirectTo(
+                "Account/RegisterConfirmation",
+                new() { ["email"] = Input.Email, ["returnUrl"] = ReturnUrl });
+        }
+
+        RedirectManager.RedirectTo("Manageroles");
+    }
+
+    private ApplicationUser CreateUser()
+    {
+        try
+        {
+            return Activator.CreateInstance<ApplicationUser>();
+        }
+        catch
+        {
+            throw new InvalidOperationException($"Can't create an instance of '{nameof(ApplicationUser)}'. " +
+                $"Ensure that '{nameof(ApplicationUser)}' is not an abstract class and has a parameterless constructor.");
+        }
+    }
+
+    private IUserEmailStore<ApplicationUser> GetEmailStore()
+    {
+        if (!UserManager.SupportsUserEmail)
+        {
+            throw new NotSupportedException("The default UI requires a user store with email support.");
+        }
+        return (IUserEmailStore<ApplicationUser>)UserStore;
+    }
+    public async Task RemoveUserFromRoleAsync(string userId, string roleName)
+    {
+        var user = await UserManager.FindByIdAsync(userId);
+        if (user == null)
+        {
+            Logger.LogWarning("Attempted to remove role '{RoleName}' from non-existent user with ID '{UserId}'.", roleName, userId);
+            throw new InvalidOperationException($"User with ID '{userId}' not found.");
+        }
+
+        if (await UserManager.IsInRoleAsync(user, roleName))
+        {
+            var result = await UserManager.RemoveFromRoleAsync(user, roleName);
+            if (result.Succeeded)
+            {
+                Logger.LogInformation("Removed role '{RoleName}' from user '{UserId}'.", roleName, userId);
+            }
+            else
+            {
+                Logger.LogError("Failed to remove role '{RoleName}' from user '{UserId}': {Errors}", roleName, userId, string.Join(", ", result.Errors.Select(e => e.Description)));
+                throw new InvalidOperationException($"Failed to remove user from role '{roleName}'.");
+            }
+        }
+        else
+        {
+            Logger.LogInformation("User '{UserId}' is not in role '{RoleName}'. No action taken.", userId, roleName);
+            throw new InvalidOperationException($"User is not in role '{roleName}'.");
+        }
+    }
+    public bool IsAllowedWord(string input, params string[] allowedWords)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return false; // Input is null or empty
+        }
+
+        return allowedWords.Contains(input, StringComparer.OrdinalIgnoreCase);
+    }
+    
+    
+    private sealed class InputModel
+    {
+        [Required]
+        [EmailAddress]
+        [Display(Name = "Email")]
+        public string Email { get; set; } = "";
+
+        [Required]
+        [Display(Name = "Role")]
+        [AllowedWordsAttribute("admin", "manager", "superuser", "user")]
+        public string NewUserRoles { get; set; } = "";
+
+        [Required]
+        [StringLength(100, ErrorMessage = "The {0} must be at least {2} and at max {1} characters long.", MinimumLength = 6)]
+        [DataType(DataType.Password)]
+        [Display(Name = "Password")]
+        public string Password { get; set; } = "";
+
+        [DataType(DataType.Password)]
+        [Display(Name = "Confirm password")]
+        [Compare("Password", ErrorMessage = "The password and confirmation password do not match.")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+    }
