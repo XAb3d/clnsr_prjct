@@ -357,11 +357,11 @@
                         AlertSeverityMessage = "Success: The uploaded spreadsheet contains the expected headers";
                         AlertSeverity = MudBlazor.Severity.Success;
                         AlertSeverityVisible = "d-block";
-                        //await DataManagementService.SaveExcelDataToDatabaseInd(ExcelDataRecieved);
+                        // Persist REF file to DB (upsert — new records inserted, existing enriched)
+                        var refChangelogInd = await DataManagementService.SaveExcelDataToDatabaseInd(
+                            ExcelDataRecieved.Select(r => MapDBIndividualContextToIndividualContext(r)), filename);
                         StateHasChanged();
-                        //await DataManagementService.SaveExcelDataToDatabaseInd(ExcelDataRecieved);
                         var RefData = await DataManagementService.GETReferenceData_IND(filename);
-                        //var mainMatcherTransformer = REF_MainMatcherTransformer(RefData, ExcelDataRecieved);
                         var (mainMatcherTransformer, _correctDateOfBirth, _dobIssues, _matchdata) = REF_MainMatcherTransformer_IND(RefData, ExcelDataRecieved);
                         byte[] ExcelDataTobeDownloaded = await REF_SaveToExcelAsync(mainMatcherTransformer);
                         await REF_DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
@@ -430,11 +430,10 @@
                         AlertSeverityMessage = "Success: The uploaded spreadsheet contains the expected headers";
                         AlertSeverity = MudBlazor.Severity.Success;
                         AlertSeverityVisible = "d-block";
-                        //await DataManagementService.SaveExcelDataToDatabaseInd(ExcelDataRecieved);
+                        // Persist REF file to DB (upsert)
+                        await DataManagementService.SaveExcelDataToDatabaseBus(ExcelDataRecieved, filename);
                         StateHasChanged();
-                        //await DataManagementService.SaveExcelDataToDatabaseInd(ExcelDataRecieved);
                         var RefData = await DataManagementService.GETReferenceData_BUS(filename);
-                        //var mainMatcherTransformer = REF_MainMatcherTransformer(RefData, ExcelDataRecieved);
                         var (mainMatcherTransformer, _correctDateOfBirth, _dobIssues, _matchdata) = REF_MainMatcherTransformer_BUS(RefData, ExcelDataRecieved);
                         byte[] ExcelDataTobeDownloaded = await REF_SaveToExcelAsync(mainMatcherTransformer);
                         await REF_DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
@@ -1526,23 +1525,28 @@
     (List<DBIndividualContext> _individualContext, string _correctDateOfBirth, string _dobIssues, string _matchdata) REF_MainMatcherTransformer_IND(List<IndividualRef> savedDatafromOurDatabase, List<DBIndividualContext> recordFromClient)
     {
         int correctDateOfBirth = 0; int dobIssues = 0; int matchdata = 0;
+
+        // Build O(1) lookup index — avoids O(n²) FirstOrDefault inside loop
+        var savedIndex = savedDatafromOurDatabase.ToDictionary(
+            r => (NormalizeAccountNumber(r.CreditFacilityAccNum),
+                  NormalizeCustomerId(r.CustomerID),
+                  r.DisbursementDate ?? string.Empty),
+            r => r
+        );
+
         foreach (var clientRecord in recordFromClient)
         {
-            var clientAccount = NormalizeAccountNumber(clientRecord.CreditFacilityAccNum);
-            var clientCustomer = NormalizeCustomerId(clientRecord.CustomerID);
-            var matchingSavedRecord = savedDatafromOurDatabase.FirstOrDefault(saved =>
-                NormalizeAccountNumber(saved.CreditFacilityAccNum) == clientAccount &&
-                NormalizeCustomerId(saved.CustomerID) == clientCustomer &&
-                saved.DisbursementDate == clientRecord.DisbursementDate);
+            var key = (NormalizeAccountNumber(clientRecord.CreditFacilityAccNum),
+                       NormalizeCustomerId(clientRecord.CustomerID),
+                       clientRecord.DisbursementDate ?? string.Empty);
 
-            if (matchingSavedRecord == null)
+            if (!savedIndex.TryGetValue(key, out var matchingSavedRecord))
             {
                 clientRecord.Status = string.Empty;
                 matchdata++;
             }
             else
             {
-                // Compare DateOfBirth
                 if (matchingSavedRecord.DateOfBirth == clientRecord.DateOfBirth)
                 {
                     clientRecord.Status = string.Empty;
@@ -1555,29 +1559,33 @@
                 }
             }
         }
-        //DOB
         return (recordFromClient, correctDateOfBirth.ToString(), dobIssues.ToString(), matchdata.ToString());
     }
     (List<DBBusinessContext> _individualContext, string _correctDateOfBirth, string _dobIssues, string _matchdata) REF_MainMatcherTransformer_BUS(List<BusinessRef> savedDatafromOurDatabase, List<DBBusinessContext> recordFromClient)
     {
         int correctDateOfBirth = 0; int dobIssues = 0; int matchdata = 0;
+
+        // Build O(1) lookup index
+        var savedIndex = savedDatafromOurDatabase.ToDictionary(
+            r => (NormalizeAccountNumber(r.CreditFacilityAccNum),
+                  NormalizeCustomerId(r.CustomerID),
+                  r.DisbursementDate ?? string.Empty),
+            r => r
+        );
+
         foreach (var clientRecord in recordFromClient)
         {
-            var clientAccount = NormalizeAccountNumber(clientRecord.Facilityaccnum);
-            var clientCustomer = NormalizeCustomerId(clientRecord.CustomerID);
-            var matchingSavedRecord = savedDatafromOurDatabase.FirstOrDefault(saved =>
-                NormalizeAccountNumber(saved.CreditFacilityAccNum) == clientAccount &&
-                NormalizeCustomerId(saved.CustomerID) == clientCustomer &&
-                saved.DisbursementDate == clientRecord.DisbursementDate);
+            var key = (NormalizeAccountNumber(clientRecord.Facilityaccnum),
+                       NormalizeCustomerId(clientRecord.CustomerID),
+                       clientRecord.DisbursementDate ?? string.Empty);
 
-            if (matchingSavedRecord == null)
+            if (!savedIndex.TryGetValue(key, out var matchingSavedRecord))
             {
                 clientRecord.Status = string.Empty;
                 matchdata++;
             }
             else
             {
-                // Compare DateOfBirth
                 if (matchingSavedRecord.DateOfBirth == clientRecord.DateOfBirth)
                 {
                     clientRecord.Status = string.Empty;
@@ -1590,9 +1598,7 @@
                 }
             }
         }
-        //DOB
         return (recordFromClient, "N/A", "N/A", matchdata.ToString());
-        //return recordFromClient;  // Return categorized records
     }
     (List<BusinessContext> allRecords, List<BusinessContext> duplicatesInd, string correctDateOfBirth, string dobIssues, string matchdata, string newdata, string duplicatescount) REF_MainMatcherTransformerInd_Clean_BUS(List<BusinessRef> fromDatabase, List<BusinessContext> fromExcelFile, bool handleDuplicates = true)
     {
@@ -1933,7 +1939,112 @@
         return list;
     }
 
-    string NormalizeDate(string dob)
+    // ── Single-pass cross-record check engine (Performance — Sprint 5) ────────
+    // Replaces CheckSamePersonalIDDifferentCustomer + CheckSameCustomerIDDifferentName
+    // + CheckDuplicateNameMismatch with ONE pass through the list to build all indexes,
+    // then applies all checks against those indexes.
+    // At 1M records: 4 separate GroupBy passes → 1 build pass + 4 index reads.
+    List<IndividualContext> RunAllCrossRecordChecksIND(List<IndividualContext> list)
+    {
+        if (list == null) throw new ArgumentNullException(nameof(list));
+
+        // ── Build all indexes in a single pass ────────────────────────────────
+        // byCustomerID:   normalisedCustomerID → all records with that ID
+        // byAccNumCustID: (normAccNum, normCustID) → all records for that facility+customer
+        // byIDField[n]:   normalisedIDValue → all records carrying that value in field n
+        var byCustomerID   = new Dictionary<string, List<IndividualContext>>();
+        var byAccNumCustID = new Dictionary<(string, string), List<IndividualContext>>();
+
+        // One entry per ID field type
+        var byNatID     = new Dictionary<string, List<IndividualContext>>();
+        var byVotersID  = new Dictionary<string, List<IndividualContext>>();
+        var byDriverLic = new Dictionary<string, List<IndividualContext>>();
+        var byPassport  = new Dictionary<string, List<IndividualContext>>();
+        var bySSNum     = new Dictionary<string, List<IndividualContext>>();
+        var byEzwich    = new Dictionary<string, List<IndividualContext>>();
+        var byOtherID   = new Dictionary<string, List<IndividualContext>>();
+
+        void AddTo<TKey>(Dictionary<TKey, List<IndividualContext>> dict, TKey key, IndividualContext rec)
+            where TKey : notnull
+        {
+            if (!dict.TryGetValue(key, out var bucket)) { bucket = new List<IndividualContext>(); dict[key] = bucket; }
+            bucket.Add(rec);
+        }
+
+        foreach (var rec in list)
+        {
+            var custId = NormalizeCustomerId(rec.CustomerID?.Data);
+            var accNum = NormalizeAccountNumber(rec.CreditFacilityAccNum?.Data);
+
+            if (!string.IsNullOrWhiteSpace(custId))
+                AddTo(byCustomerID, custId, rec);
+
+            if (!string.IsNullOrWhiteSpace(accNum) && !string.IsNullOrWhiteSpace(custId))
+                AddTo(byAccNumCustID, (accNum, custId), rec);
+
+            void IndexID(Dictionary<string, List<IndividualContext>> d, string? v)
+            { if (!string.IsNullOrWhiteSpace(v)) AddTo(d, v!.Trim().ToUpperInvariant(), rec); }
+
+            IndexID(byNatID,     rec.NatIDNum?.Data);
+            IndexID(byVotersID,  rec.VotersIDNum?.Data);
+            IndexID(byDriverLic, rec.DriverLicNum?.Data);
+            IndexID(byPassport,  rec.PassportNum?.Data);
+            IndexID(bySSNum,     rec.SSNum?.Data);
+            IndexID(byEzwich,    rec.EzwichNum?.Data);
+            IndexID(byOtherID,   rec.OtherIDNum?.Data);
+        }
+
+        // ── #12: Same PersonalID value → different CustomerIDs ────────────────
+        void CheckIDConflict(Dictionary<string, List<IndividualContext>> idx, string fieldName)
+        {
+            foreach (var grp in idx.Values)
+            {
+                var distinctCusts = grp
+                    .Where(r => !string.IsNullOrWhiteSpace(r.CustomerID?.Data))
+                    .Select(r => NormalizeCustomerId(r.CustomerID!.Data))
+                    .Distinct().Count();
+                if (distinctCusts > 1)
+                    foreach (var r in grp) r.SamePersonalIDDifferentCustomer = $"E:{fieldName}";
+            }
+        }
+        CheckIDConflict(byNatID,     "NatIDNum");
+        CheckIDConflict(byVotersID,  "VotersIDNum");
+        CheckIDConflict(byDriverLic, "DriverLicNum");
+        CheckIDConflict(byPassport,  "PassportNum");
+        CheckIDConflict(bySSNum,     "SSNum");
+        CheckIDConflict(byEzwich,    "EzwichNum");
+        CheckIDConflict(byOtherID,   "OtherIDNum");
+
+        // ── #14: Same CustomerID → different name clusters ────────────────────
+        foreach (var grp in byCustomerID.Values)
+        {
+            var distinctNames = grp
+                .Select(r => (
+                    (r.Surname?.Data   ?? string.Empty).Trim().ToUpperInvariant(),
+                    (r.FirstName?.Data ?? string.Empty).Trim().ToUpperInvariant()
+                ))
+                .Where(n => !string.IsNullOrWhiteSpace(n.Item1) || !string.IsNullOrWhiteSpace(n.Item2))
+                .Distinct().Count();
+            if (distinctNames > 1)
+                foreach (var r in grp) r.SameCustomerIDDifferentName = "E";
+        }
+
+        // ── #2: Same AccNum+CustomerID → different name clusters ──────────────
+        foreach (var grp in byAccNumCustID.Values)
+        {
+            var distinctNames = grp
+                .Select(r => (
+                    (r.Surname?.Data   ?? string.Empty).Trim().ToUpperInvariant(),
+                    (r.FirstName?.Data ?? string.Empty).Trim().ToUpperInvariant()
+                ))
+                .Where(n => !string.IsNullOrWhiteSpace(n.Item1) || !string.IsNullOrWhiteSpace(n.Item2))
+                .Distinct().Count();
+            if (distinctNames > 1)
+                foreach (var r in grp) r.DuplicateNameMismatch = "E";
+        }
+
+        return list;
+    }
     {
         if (string.IsNullOrWhiteSpace(dob))
             return string.Empty;
@@ -2287,9 +2398,7 @@
                         isSubscriber_X_or_Y = await DataManagementService.GetSubscribeX_or_Y(filename);
                         var (mainMatcherTransformer, _duplicatesInd, _correctDateOfBirth, _dobIssues, _matchdata, _newdata, _duplicateCount) = REF_MainMatcherTransformerInd_Clean_IND(RefData, ExcelDataRecieved);
                         var mainMatcherTransformer_temp = DuplicateUser_CustomerIDAndDateOfBirth(mainMatcherTransformer);
-                        mainMatcherTransformer_temp = CheckSamePersonalIDDifferentCustomer(mainMatcherTransformer_temp);
-                        mainMatcherTransformer_temp = CheckSameCustomerIDDifferentName(mainMatcherTransformer_temp);
-                        mainMatcherTransformer_temp = CheckDuplicateNameMismatch(mainMatcherTransformer_temp);
+                        mainMatcherTransformer_temp = RunAllCrossRecordChecksIND(mainMatcherTransformer_temp);
                         mainMatcherTransformer = mainMatcherTransformer_temp;
                         correctDateOfBirth = _correctDateOfBirth;
                         dobIssues = _dobIssues;
@@ -2300,7 +2409,7 @@
 
                         if (CleanOnlyOrCleanAndReference == false)
                         {
-                            await DataManagementService.SaveExcelDataToDatabaseInd(mainMatcherTransformer, filename);
+                            var idChangelog = await DataManagementService.SaveExcelDataToDatabaseInd(mainMatcherTransformer, filename);
                         }
                         byte[] ExcelDataTobeDownloaded = await SaveToExcelAsync(mainMatcherTransformer, _duplicatesInd);
                         await DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);

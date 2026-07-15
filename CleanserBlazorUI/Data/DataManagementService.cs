@@ -13,94 +13,174 @@ public class DataManagementService
         _context = context;
         _configuration = configuration;
     }
+    // Returns all reference records for this subscriber.
+    // The reference always holds the cumulative known state — every unique
+    // (AccNum, CustomerID, DisbursementDate) ever seen for this subscriber.
     public async Task<List<IndividualRef>> GETReferenceData_IND(string fileShortName)
     {
-        //CurrenVersion 
-        int CurrenVersion = await GetIndividualMaxversion();
-        CurrenVersion = CurrenVersion - 1;
         var subscriber = await GetFileShortCodeFromFileName(fileShortName);
-        return await _context.IndividualsData.Where(p => p.SubscriberCode == subscriber && p.CurrenVersion == CurrenVersion).ToListAsync();
+        return await _context.IndividualsData
+            .Where(p => p.SubscriberCode == subscriber)
+            .ToListAsync();
     }
     public async Task<List<BusinessRef>> GETReferenceData_BUS(string fileShortName)
     {
-        //CurrenVersion 
-        int CurrenVersion = await GetBusinessMaxversion();
-        CurrenVersion = CurrenVersion - 1;
         var subscriber = await GetFileShortCodeFromFileName(fileShortName);
-        return await _context.BusinessesData.Where(p => p.SubscriberCode == subscriber && p.CurrenVersion == CurrenVersion).ToListAsync();
+        return await _context.BusinessesData
+            .Where(p => p.SubscriberCode == subscriber)
+            .ToListAsync();
     }
     
     
     
-    public async Task SaveExcelDataToDatabaseInd(IEnumerable<IndividualContext> dataFromExcel, string fileShortName)
+    // ── IND Upsert ────────────────────────────────────────────────────────────
+    // Upsert key: (SubscriberCode, AccNum, CustomerID, DisbursementDate)
+    // - New records    → INSERT
+    // - Existing rows  → enrich ID fields where DB is empty + file has value
+    // - Absent records → left as-is (historical, never deleted)
+    // Returns changelog: every (AccNum, CustomerID, DisbDate, FieldName) enriched this run.
+    public async Task<List<(string AccNum, string CustomerID, string DisbDate, string FieldAdded)>>
+        SaveExcelDataToDatabaseInd(IEnumerable<IndividualContext> dataFromExcel, string fileShortName)
     {
         var subscriber = await GetFileShortCodeFromFileName(fileShortName);
-        const int batchSize = 10_000; // Adjust based on memory constraints
-        var currentBatch = new List<DBIndividualContext>(batchSize);
-        var currentBatchToDB = new List<IndividualRef>();
-        var _createdDate = DateTime.Now;
-        var currentVersion = await GetIndividualMaxversion();
+        var now        = DateTime.Now;
+        var changelog  = new List<(string, string, string, string)>();
+
+        var existing = await _context.IndividualsData
+            .Where(r => r.SubscriberCode == subscriber)
+            .ToListAsync();
+
+        var existingIndex = existing.ToDictionary(
+            r => (Norm(r.CreditFacilityAccNum), Norm(r.CustomerID), Norm(r.DisbursementDate)),
+            r => r
+        );
+
+        var toInsert = new List<IndividualRef>();
+        var toUpdate = new List<IndividualRef>();
+
         foreach (var item in dataFromExcel)
         {
-            currentBatchToDB.Add(new IndividualRef
-            {
-                CreditFacilityAccNum = item.CreditFacilityAccNum.Data,
-                CustomerID = item.CustomerID.Data,
-                DisbursementDate = item.DisbursementDate.Data,
-                DateOfBirth = item.DateOfBirth.Data,
-                SubscriberCode = subscriber,
-                CurrenVersion = currentVersion,
-                CreatedDate = _createdDate
-            });
+            var key = (Norm(item.CreditFacilityAccNum?.Data),
+                       Norm(item.CustomerID?.Data),
+                       Norm(item.DisbursementDate?.Data));
 
-            if (currentBatchToDB.Count >= batchSize)
+            if (existingIndex.TryGetValue(key, out var dbRow))
             {
-                await BulkInsertBatchIND(currentBatchToDB);
-                currentBatch.Clear();
-                currentBatchToDB.Clear();
+                bool changed = false;
+                changed |= EnrichField(ref dbRow.NatIDNum,     item.NatIDNum?.Data,     "NatIDNum",     key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.VotersIDNum,  item.VotersIDNum?.Data,  "VotersIDNum",  key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.DriverLicNum, item.DriverLicNum?.Data, "DriverLicNum", key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.PassportNum,  item.PassportNum?.Data,  "PassportNum",  key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.SSNum,        item.SSNum?.Data,        "SSNum",        key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.EzwichNum,    item.EzwichNum?.Data,    "EzwichNum",    key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref dbRow.OtherIDNum,   item.OtherIDNum?.Data,   "OtherIDNum",   key.Item1, key.Item2, key.Item3, changelog);
+                if (!string.IsNullOrWhiteSpace(item.DateOfBirth?.Data))
+                    dbRow.DateOfBirth = item.DateOfBirth.Data;
+                if (changed) { dbRow.LastUpdatedDate = now; toUpdate.Add(dbRow); }
+            }
+            else
+            {
+                toInsert.Add(new IndividualRef
+                {
+                    SubscriberCode       = subscriber,
+                    CreditFacilityAccNum = item.CreditFacilityAccNum?.Data ?? string.Empty,
+                    CustomerID           = item.CustomerID?.Data            ?? string.Empty,
+                    DisbursementDate     = item.DisbursementDate?.Data      ?? string.Empty,
+                    DateOfBirth          = item.DateOfBirth?.Data           ?? string.Empty,
+                    NatIDNum             = item.NatIDNum?.Data              ?? string.Empty,
+                    VotersIDNum          = item.VotersIDNum?.Data           ?? string.Empty,
+                    DriverLicNum         = item.DriverLicNum?.Data          ?? string.Empty,
+                    PassportNum          = item.PassportNum?.Data           ?? string.Empty,
+                    SSNum                = item.SSNum?.Data                 ?? string.Empty,
+                    EzwichNum            = item.EzwichNum?.Data             ?? string.Empty,
+                    OtherIDNum           = item.OtherIDNum?.Data            ?? string.Empty,
+                    CurrenVersion        = 1,
+                    CreatedDate          = now,
+                    LastUpdatedDate      = now
+                });
             }
         }
 
-        // Insert remaining records
-        if (currentBatchToDB.Count > 0)
-        {
-            await BulkInsertBatchIND(currentBatchToDB);
-        }
+        const int batchSize = 10_000;
+        for (int i = 0; i < toInsert.Count; i += batchSize)
+            await BulkInsertBatchIND(toInsert.Skip(i).Take(batchSize).ToList());
+        if (toUpdate.Count > 0)
+            await _context.BulkUpdateAsync(toUpdate, new BulkConfig { BatchSize = 4000 });
+
+        return changelog;
     }
+
+    // ── BUS Upsert ────────────────────────────────────────────────────────────
     public async Task SaveExcelDataToDatabaseBus(IEnumerable<BusinessContext> dataFromExcel, string fileShortName)
     {
         var subscriber = await GetFileShortCodeFromFileName(fileShortName);
-        const int batchSize = 10_000; // Adjust based on memory constraints
-        var currentBatch = new List<DBBusinessContext>(batchSize);
-        var currentBatchToDB = new List<BusinessRef>();
-        var _createdDate = DateTime.Now;
-        var currentVersion = await GetBusinessMaxversion();
+        var now        = DateTime.Now;
+
+        var existing = await _context.BusinessesData
+            .Where(r => r.SubscriberCode == subscriber)
+            .ToListAsync();
+
+        var existingIndex = existing.ToDictionary(
+            r => (Norm(r.CreditFacilityAccNum), Norm(r.CustomerID), Norm(r.DisbursementDate)),
+            r => r
+        );
+
+        var toInsert = new List<BusinessRef>();
+        var toUpdate = new List<BusinessRef>();
+
         foreach (var item in dataFromExcel)
         {
-            currentBatchToDB.Add(new BusinessRef
-            {
-                CreditFacilityAccNum = item.Facilityaccnum.Data,
-                CustomerID = item.CustomerID.Data,
-                DisbursementDate = item.DisbursementDate.Data,
-                SubscriberCode = subscriber,
-                CurrenVersion = currentVersion,
-                CreatedDate = _createdDate
-            });
+            var key = (Norm(item.Facilityaccnum?.Data),
+                       Norm(item.CustomerID?.Data),
+                       Norm(item.DisbursementDate?.Data));
 
-            if (currentBatchToDB.Count >= batchSize)
+            if (existingIndex.TryGetValue(key, out var dbRow))
             {
-                await BulkInsertBatchBUS(currentBatchToDB);
-                currentBatch.Clear();
-                currentBatchToDB.Clear();
+                if (!string.IsNullOrWhiteSpace(item.DateOfBirth?.Data))
+                    dbRow.DateOfBirth = item.DateOfBirth.Data;
+                dbRow.LastUpdatedDate = now;
+                toUpdate.Add(dbRow);
+            }
+            else
+            {
+                toInsert.Add(new BusinessRef
+                {
+                    SubscriberCode       = subscriber,
+                    CreditFacilityAccNum = item.Facilityaccnum?.Data  ?? string.Empty,
+                    CustomerID           = item.CustomerID?.Data       ?? string.Empty,
+                    DisbursementDate     = item.DisbursementDate?.Data ?? string.Empty,
+                    DateOfBirth          = item.DateOfBirth?.Data      ?? string.Empty,
+                    CurrenVersion        = 1,
+                    CreatedDate          = now,
+                    LastUpdatedDate      = now
+                });
             }
         }
 
-        // Insert remaining records
-        if (currentBatchToDB.Count > 0)
-        {
-            await BulkInsertBatchBUS(currentBatchToDB);
-        }
+        const int batchSize = 10_000;
+        for (int i = 0; i < toInsert.Count; i += batchSize)
+            await BulkInsertBatchBUS(toInsert.Skip(i).Take(batchSize).ToList());
+        if (toUpdate.Count > 0)
+            await _context.BulkUpdateAsync(toUpdate, new BulkConfig { BatchSize = 4000 });
     }
+
+    private bool EnrichField(
+        ref string? dbField, string? fileValue,
+        string fieldName, string accNum, string custId, string disbDate,
+        List<(string, string, string, string)> changelog)
+    {
+        if (!string.IsNullOrWhiteSpace(fileValue) && string.IsNullOrWhiteSpace(dbField))
+        {
+            dbField = fileValue;
+            changelog.Add((accNum, custId, disbDate, fieldName));
+            return true;
+        }
+        return false;
+    }
+
+    private string Norm(string? v) =>
+        string.IsNullOrWhiteSpace(v) ? string.Empty : v.Trim().ToUpperInvariant();
+
 
 
     //INSERT REFERENCE BUSINESS DATA
