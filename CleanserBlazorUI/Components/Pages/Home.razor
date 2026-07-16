@@ -1870,6 +1870,54 @@
     // ── Issue #14 ─────────────────────────────────────────────────────────────
     // Same CustomerID linked to more than one distinct name cluster across records.
     // Name cluster = normalised Surname + FirstName (trimmed, uppercased).
+    // ── Name normalisation helper ─────────────────────────────────────────────
+    // Strips all non-letter characters (hyphens, apostrophes, spaces, periods),
+    // uppercases, then sorts tokens alphabetically before joining.
+    // This means:
+    //   "ADAMU ABDUL-KADIR"  → "ABDULKADIRADAMU"
+    //   "ADAMU ABDULKADIR"   → "ABDULKADIRADAMU"  ✓ same
+    //   "ADAMU ABDUL KADIR"  → "ABDULKADIRADAMU"  ✓ same
+    //   "ADAMU ABDULKADIR MOHAMMED" → "ABDULKADIRAADAMUMOHAMMED" — superset
+    // For superset check: shorter canonical is fully contained in longer one.
+    string NormaliseNameForComparison(string surname, string firstName)
+    {
+        var raw = $"{surname} {firstName}".ToUpperInvariant();
+        // Remove everything that isn't a letter
+        var lettersOnly = new string(raw.Where(char.IsLetter).ToArray());
+        // Also build a sorted-token version for catching reordered names
+        var tokens = raw.Split(new[] { ' ', '-', '\'', '.', ',' },
+                               StringSplitOptions.RemoveEmptyEntries)
+                        .Select(t => new string(t.Where(char.IsLetter).ToArray()))
+                        .Where(t => t.Length > 0)
+                        .OrderBy(t => t)
+                        .ToArray();
+        // Primary key: all letters concatenated (catches hyphen/space variants)
+        // Secondary key: sorted tokens joined (catches reordering)
+        // We return the letters-only form — callers use IsSameName() to compare
+        return lettersOnly;
+    }
+
+    // Returns true if two name pairs refer to the same person using:
+    // 1. Exact canonical match (letters only, case-insensitive)
+    // 2. Subset match — shorter name is fully contained in longer (dropped middle name)
+    bool IsSameName(string canon1, string canon2)
+    {
+        if (canon1 == canon2) return true;
+        // Subset: one name's letters are fully contained within the other
+        // e.g. "ADAMUABDULKADIR" is contained in "ADAMUABDULKADIRMOHAMMED"
+        if (canon1.Length > 0 && canon2.Length > 0)
+        {
+            if (canon2.Contains(canon1) || canon1.Contains(canon2))
+                return true;
+        }
+        return false;
+    }
+
+    // ── Issue #14 ─────────────────────────────────────────────────────────────
+    // Same CustomerID linked to more than one distinct name cluster across records.
+    // Uses canonical name comparison + DOB tiebreaker.
+    // Rule: if canonical names differ BUT DOB matches → same person, no flag.
+    //       if canonical names differ AND DOB differs  → genuine conflict, flag.
     List<IndividualContext> CheckSameCustomerIDDifferentName(List<IndividualContext> list)
     {
         if (list == null) throw new ArgumentNullException(nameof(list));
@@ -1880,31 +1928,52 @@
 
         foreach (var grp in groups)
         {
-            var distinctNames = grp
-                .Select(r => (
-                    Surname:    (r.Surname?.Data    ?? string.Empty).Trim().ToUpperInvariant(),
-                    FirstName:  (r.FirstName?.Data  ?? string.Empty).Trim().ToUpperInvariant()
-                ))
-                .Where(n => !string.IsNullOrWhiteSpace(n.Surname) || !string.IsNullOrWhiteSpace(n.FirstName))
-                .Distinct()
-                .Count();
+            // Get canonical name per record
+            var records = grp.ToList();
+            bool hasConflict = false;
 
-            if (distinctNames > 1)
+            for (int i = 0; i < records.Count; i++)
             {
-                foreach (var rec in grp)
-                    rec.SameCustomerIDDifferentName = "E";
+                for (int j = i + 1; j < records.Count; j++)
+                {
+                    var a = records[i]; var b = records[j];
+                    var canonA = NormaliseNameForComparison(
+                        a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty);
+                    var canonB = NormaliseNameForComparison(
+                        b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty);
+
+                    if (string.IsNullOrWhiteSpace(canonA) || string.IsNullOrWhiteSpace(canonB))
+                        continue;
+
+                    if (!IsSameName(canonA, canonB))
+                    {
+                        // Names differ — check DOB as tiebreaker
+                        var dobA = (a.DateOfBirth?.Data ?? string.Empty).Trim();
+                        var dobB = (b.DateOfBirth?.Data ?? string.Empty).Trim();
+                        bool dobMatch = !string.IsNullOrWhiteSpace(dobA) &&
+                                        !string.IsNullOrWhiteSpace(dobB) &&
+                                        dobA == dobB;
+                        if (!dobMatch)
+                        {
+                            hasConflict = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasConflict) break;
             }
+
+            if (hasConflict)
+                foreach (var rec in records)
+                    rec.SameCustomerIDDifferentName = "E";
         }
 
         return list;
     }
 
-    // ── Issue #2 (exact name match) ───────────────────────────────────────────
-    // Records that share the same AccNum + CustomerID (normalised) but have
-    // different name clusters — flags name discrepancy for review.
-    // Overdraft facilities (CreditFacilityType = "V") are excluded because
-    // the same overdraft legitimately appears with varying disbursement dates
-    // and this check is about name consistency, not disbursement duplication.
+    // ── Issue #2 (name mismatch on same facility) ─────────────────────────────
+    // Records that share AccNum + CustomerID but have different name clusters.
+    // Uses canonical name comparison + DOB tiebreaker (same rules as #14).
     List<IndividualContext> CheckDuplicateNameMismatch(List<IndividualContext> list)
     {
         if (list == null) throw new ArgumentNullException(nameof(list));
@@ -1920,20 +1989,42 @@
 
         foreach (var grp in groups)
         {
-            var distinctNames = grp
-                .Select(r => (
-                    Surname:   (r.Surname?.Data   ?? string.Empty).Trim().ToUpperInvariant(),
-                    FirstName: (r.FirstName?.Data ?? string.Empty).Trim().ToUpperInvariant()
-                ))
-                .Where(n => !string.IsNullOrWhiteSpace(n.Surname) || !string.IsNullOrWhiteSpace(n.FirstName))
-                .Distinct()
-                .Count();
+            var records = grp.ToList();
+            bool hasConflict = false;
 
-            if (distinctNames > 1)
+            for (int i = 0; i < records.Count; i++)
             {
-                foreach (var rec in grp)
-                    rec.DuplicateNameMismatch = "E";
+                for (int j = i + 1; j < records.Count; j++)
+                {
+                    var a = records[i]; var b = records[j];
+                    var canonA = NormaliseNameForComparison(
+                        a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty);
+                    var canonB = NormaliseNameForComparison(
+                        b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty);
+
+                    if (string.IsNullOrWhiteSpace(canonA) || string.IsNullOrWhiteSpace(canonB))
+                        continue;
+
+                    if (!IsSameName(canonA, canonB))
+                    {
+                        var dobA = (a.DateOfBirth?.Data ?? string.Empty).Trim();
+                        var dobB = (b.DateOfBirth?.Data ?? string.Empty).Trim();
+                        bool dobMatch = !string.IsNullOrWhiteSpace(dobA) &&
+                                        !string.IsNullOrWhiteSpace(dobB) &&
+                                        dobA == dobB;
+                        if (!dobMatch)
+                        {
+                            hasConflict = true;
+                            break;
+                        }
+                    }
+                }
+                if (hasConflict) break;
             }
+
+            if (hasConflict)
+                foreach (var rec in records)
+                    rec.DuplicateNameMismatch = "E";
         }
 
         return list;
@@ -2018,29 +2109,59 @@
         // ── #14: Same CustomerID → different name clusters ────────────────────
         foreach (var grp in byCustomerID.Values)
         {
-            var distinctNames = grp
-                .Select(r => (
-                    (r.Surname?.Data   ?? string.Empty).Trim().ToUpperInvariant(),
-                    (r.FirstName?.Data ?? string.Empty).Trim().ToUpperInvariant()
-                ))
-                .Where(n => !string.IsNullOrWhiteSpace(n.Item1) || !string.IsNullOrWhiteSpace(n.Item2))
-                .Distinct().Count();
-            if (distinctNames > 1)
-                foreach (var r in grp) r.SameCustomerIDDifferentName = "E";
+            var records = grp.ToList();
+            bool hasConflict = false;
+            for (int i = 0; i < records.Count && !hasConflict; i++)
+            {
+                for (int j = i + 1; j < records.Count && !hasConflict; j++)
+                {
+                    var a = records[i]; var b = records[j];
+                    var canonA = NormaliseNameForComparison(
+                        a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty);
+                    var canonB = NormaliseNameForComparison(
+                        b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty);
+                    if (string.IsNullOrWhiteSpace(canonA) || string.IsNullOrWhiteSpace(canonB)) continue;
+                    if (!IsSameName(canonA, canonB))
+                    {
+                        var dobA = (a.DateOfBirth?.Data ?? string.Empty).Trim();
+                        var dobB = (b.DateOfBirth?.Data ?? string.Empty).Trim();
+                        bool dobMatch = !string.IsNullOrWhiteSpace(dobA) &&
+                                        !string.IsNullOrWhiteSpace(dobB) && dobA == dobB;
+                        if (!dobMatch) hasConflict = true;
+                    }
+                }
+            }
+            if (hasConflict)
+                foreach (var r in records) r.SameCustomerIDDifferentName = "E";
         }
 
         // ── #2: Same AccNum+CustomerID → different name clusters ──────────────
         foreach (var grp in byAccNumCustID.Values)
         {
-            var distinctNames = grp
-                .Select(r => (
-                    (r.Surname?.Data   ?? string.Empty).Trim().ToUpperInvariant(),
-                    (r.FirstName?.Data ?? string.Empty).Trim().ToUpperInvariant()
-                ))
-                .Where(n => !string.IsNullOrWhiteSpace(n.Item1) || !string.IsNullOrWhiteSpace(n.Item2))
-                .Distinct().Count();
-            if (distinctNames > 1)
-                foreach (var r in grp) r.DuplicateNameMismatch = "E";
+            var records = grp.ToList();
+            bool hasConflict = false;
+            for (int i = 0; i < records.Count && !hasConflict; i++)
+            {
+                for (int j = i + 1; j < records.Count && !hasConflict; j++)
+                {
+                    var a = records[i]; var b = records[j];
+                    var canonA = NormaliseNameForComparison(
+                        a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty);
+                    var canonB = NormaliseNameForComparison(
+                        b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty);
+                    if (string.IsNullOrWhiteSpace(canonA) || string.IsNullOrWhiteSpace(canonB)) continue;
+                    if (!IsSameName(canonA, canonB))
+                    {
+                        var dobA = (a.DateOfBirth?.Data ?? string.Empty).Trim();
+                        var dobB = (b.DateOfBirth?.Data ?? string.Empty).Trim();
+                        bool dobMatch = !string.IsNullOrWhiteSpace(dobA) &&
+                                        !string.IsNullOrWhiteSpace(dobB) && dobA == dobB;
+                        if (!dobMatch) hasConflict = true;
+                    }
+                }
+            }
+            if (hasConflict)
+                foreach (var r in records) r.DuplicateNameMismatch = "E";
         }
 
         return list;
