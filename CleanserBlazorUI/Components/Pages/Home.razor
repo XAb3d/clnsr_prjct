@@ -1821,14 +1821,16 @@
     }
 
     // ── Issue #12 ─────────────────────────────────────────────────────────────
-    // Same PersonalID value (NatID, VotersID, DriverLic, PassportNum, SSNum,
-    // EzwichNum, OtherIDNum) mapped to more than one distinct CustomerID.
-    // Flags ALL affected records so the conflict is visible on every row.
+    // Same ID VALUE (across any of the 7 ID fields) mapped to more than one
+    // distinct CustomerID. Cross-column aware: NatIDNum on rec A matching
+    // VotersIDNum on rec B is detected and flagged.
     List<IndividualContext> CheckSamePersonalIDDifferentCustomer(List<IndividualContext> list)
     {
         if (list == null) throw new ArgumentNullException(nameof(list));
 
-        // Each entry: (idFieldName, selector) — we check each ID type independently
+        // Build cross-column ID value index
+        var byIDValue = new Dictionary<string, List<(string CustID, string Field, IndividualContext Rec)>>();
+
         var idSelectors = new List<(string FieldName, Func<IndividualContext, string?> GetValue)>
         {
             ("NatIDNum",    r => r.NatIDNum?.Data),
@@ -1840,27 +1842,31 @@
             ("OtherIDNum",  r => r.OtherIDNum?.Data),
         };
 
-        foreach (var (fieldName, getValue) in idSelectors)
+        foreach (var rec in list)
         {
-            // Group records by the ID value, excluding blank values
-            var groups = list
-                .Where(r => !string.IsNullOrWhiteSpace(getValue(r)))
-                .GroupBy(r => getValue(r)!.Trim().ToUpperInvariant());
+            var custId = NormalizeCustomerId(rec.CustomerID?.Data);
+            if (string.IsNullOrWhiteSpace(custId)) continue;
 
-            foreach (var grp in groups)
+            foreach (var (fieldName, getValue) in idSelectors)
             {
-                // Count how many distinct normalised CustomerIDs share this ID value
-                var distinctCustomers = grp
-                    .Where(r => !string.IsNullOrWhiteSpace(r.CustomerID?.Data))
-                    .Select(r => NormalizeCustomerId(r.CustomerID!.Data))
-                    .Distinct()
-                    .Count();
+                var value = getValue(rec);
+                if (!IsValidIDValue(value)) continue;
+                var key = value!.Trim().ToUpperInvariant();
+                if (!byIDValue.TryGetValue(key, out var bucket))
+                { bucket = new List<(string, string, IndividualContext)>(); byIDValue[key] = bucket; }
+                bucket.Add((custId, fieldName, rec));
+            }
+        }
 
-                if (distinctCustomers > 1)
-                {
-                    foreach (var rec in grp)
-                        rec.SamePersonalIDDifferentCustomer = $"E:{fieldName}";
-                }
+        foreach (var kvp in byIDValue)
+        {
+            var entries = kvp.Value;
+            var distinctCusts = entries.Select(e => e.CustID).Distinct().Count();
+            if (distinctCusts > 1)
+            {
+                var fieldSummary = string.Join("|", entries.Select(e => e.Field).Distinct().OrderBy(f => f));
+                foreach (var entry in entries)
+                    entry.Rec.SamePersonalIDDifferentCustomer = $"E:{fieldSummary}";
             }
         }
 
@@ -1870,6 +1876,34 @@
     // ── Issue #14 ─────────────────────────────────────────────────────────────
     // Same CustomerID linked to more than one distinct name cluster across records.
     // Name cluster = normalised Surname + FirstName (trimmed, uppercased).
+    // ── CurBal parser ─────────────────────────────────────────────────────────
+    // Returns null if blank, non-numeric, or a known placeholder.
+    // Used by duplicate resolution to pick the record with the lowest balance.
+    decimal? ParseCurBal(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var cleaned = raw.Trim().Replace(",", "");
+        if (decimal.TryParse(cleaned, out decimal val)) return val;
+        return null;
+    }
+
+    // ── ID value quality filter ───────────────────────────────────────────────
+    // Returns false for values that are too short, all-same-digit, or known
+    // placeholders — these would cause false-positive cross-column ID conflicts.
+    static readonly HashSet<string> _idPlaceholders = new(StringComparer.OrdinalIgnoreCase)
+        { "N/A", "NA", "NONE", "NULL", "NIL", "0", "00000", "-", "NIL", "UNKNOWN", "NOTAPPLICABLE" };
+
+    bool IsValidIDValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+        var v = value.Trim();
+        if (v.Length < 5) return false;
+        if (_idPlaceholders.Contains(v)) return false;
+        // All-same-character check (e.g. "0000000", "9999999", "XXXXXXX")
+        if (v.Distinct().Count() == 1) return false;
+        return true;
+    }
+
     // ── Name normalisation helper ─────────────────────────────────────────────
     // Strips all non-letter characters (hyphens, apostrophes, spaces, periods),
     // uppercases, then sorts tokens alphabetically before joining.
@@ -2042,24 +2076,26 @@
         // ── Build all indexes in a single pass ────────────────────────────────
         // byCustomerID:   normalisedCustomerID → all records with that ID
         // byAccNumCustID: (normAccNum, normCustID) → all records for that facility+customer
-        // byIDField[n]:   normalisedIDValue → all records carrying that value in field n
+        // byIDValue:      any ID value (across ALL 7 ID fields) → list of (customerID, fieldName, record)
+        //                 Cross-column: same value in NatIDNum on rec A and VotersIDNum on rec B → flagged
         var byCustomerID   = new Dictionary<string, List<IndividualContext>>();
         var byAccNumCustID = new Dictionary<(string, string), List<IndividualContext>>();
-
-        // One entry per ID field type
-        var byNatID     = new Dictionary<string, List<IndividualContext>>();
-        var byVotersID  = new Dictionary<string, List<IndividualContext>>();
-        var byDriverLic = new Dictionary<string, List<IndividualContext>>();
-        var byPassport  = new Dictionary<string, List<IndividualContext>>();
-        var bySSNum     = new Dictionary<string, List<IndividualContext>>();
-        var byEzwich    = new Dictionary<string, List<IndividualContext>>();
-        var byOtherID   = new Dictionary<string, List<IndividualContext>>();
+        var byIDValue      = new Dictionary<string, List<(string CustID, string Field, IndividualContext Rec)>>();
 
         void AddTo<TKey>(Dictionary<TKey, List<IndividualContext>> dict, TKey key, IndividualContext rec)
             where TKey : notnull
         {
             if (!dict.TryGetValue(key, out var bucket)) { bucket = new List<IndividualContext>(); dict[key] = bucket; }
             bucket.Add(rec);
+        }
+
+        void IndexIDValue(string? value, string fieldName, string custID, IndividualContext rec)
+        {
+            if (!IsValidIDValue(value)) return;
+            var key = value!.Trim().ToUpperInvariant();
+            if (!byIDValue.TryGetValue(key, out var bucket))
+            { bucket = new List<(string, string, IndividualContext)>(); byIDValue[key] = bucket; }
+            bucket.Add((custID, fieldName, rec));
         }
 
         foreach (var rec in list)
@@ -2073,38 +2109,41 @@
             if (!string.IsNullOrWhiteSpace(accNum) && !string.IsNullOrWhiteSpace(custId))
                 AddTo(byAccNumCustID, (accNum, custId), rec);
 
-            void IndexID(Dictionary<string, List<IndividualContext>> d, string? v)
-            { if (!string.IsNullOrWhiteSpace(v)) AddTo(d, v!.Trim().ToUpperInvariant(), rec); }
-
-            IndexID(byNatID,     rec.NatIDNum?.Data);
-            IndexID(byVotersID,  rec.VotersIDNum?.Data);
-            IndexID(byDriverLic, rec.DriverLicNum?.Data);
-            IndexID(byPassport,  rec.PassportNum?.Data);
-            IndexID(bySSNum,     rec.SSNum?.Data);
-            IndexID(byEzwich,    rec.EzwichNum?.Data);
-            IndexID(byOtherID,   rec.OtherIDNum?.Data);
+            // Cross-column ID index — all 7 fields indexed by their VALUE
+            IndexIDValue(rec.NatIDNum?.Data,     "NatIDNum",     custId, rec);
+            IndexIDValue(rec.VotersIDNum?.Data,  "VotersIDNum",  custId, rec);
+            IndexIDValue(rec.DriverLicNum?.Data, "DriverLicNum", custId, rec);
+            IndexIDValue(rec.PassportNum?.Data,  "PassportNum",  custId, rec);
+            IndexIDValue(rec.SSNum?.Data,        "SSNum",        custId, rec);
+            IndexIDValue(rec.EzwichNum?.Data,    "EzwichNum",    custId, rec);
+            IndexIDValue(rec.OtherIDNum?.Data,   "OtherIDNum",   custId, rec);
         }
 
-        // ── #12: Same PersonalID value → different CustomerIDs ────────────────
-        void CheckIDConflict(Dictionary<string, List<IndividualContext>> idx, string fieldName)
+        // ── #12: Same ID value → different CustomerIDs (cross-column aware) ──
+        // An ID value is flagged if it appears under ANY field combination
+        // for more than one distinct CustomerID.
+        // e.g. NatIDNum=125091895 for CustA AND VotersIDNum=125091895 for CustB → flagged
+        foreach (var kvp in byIDValue)
         {
-            foreach (var grp in idx.Values)
+            var entries = kvp.Value;
+            var distinctCusts = entries
+                .Where(e => !string.IsNullOrWhiteSpace(e.CustID))
+                .Select(e => e.CustID)
+                .Distinct()
+                .Count();
+
+            if (distinctCusts > 1)
             {
-                var distinctCusts = grp
-                    .Where(r => !string.IsNullOrWhiteSpace(r.CustomerID?.Data))
-                    .Select(r => NormalizeCustomerId(r.CustomerID!.Data))
-                    .Distinct().Count();
-                if (distinctCusts > 1)
-                    foreach (var r in grp) r.SamePersonalIDDifferentCustomer = $"E:{fieldName}";
+                // Build a description of which fields the conflict spans
+                var fieldSummary = string.Join("|", entries
+                    .Select(e => e.Field)
+                    .Distinct()
+                    .OrderBy(f => f));
+
+                foreach (var entry in entries)
+                    entry.Rec.SamePersonalIDDifferentCustomer = $"E:{fieldSummary}";
             }
         }
-        CheckIDConflict(byNatID,     "NatIDNum");
-        CheckIDConflict(byVotersID,  "VotersIDNum");
-        CheckIDConflict(byDriverLic, "DriverLicNum");
-        CheckIDConflict(byPassport,  "PassportNum");
-        CheckIDConflict(bySSNum,     "SSNum");
-        CheckIDConflict(byEzwich,    "EzwichNum");
-        CheckIDConflict(byOtherID,   "OtherIDNum");
 
         // ── #14: Same CustomerID → different name clusters ────────────────────
         foreach (var grp in byCustomerID.Values)
@@ -2295,35 +2334,63 @@
 
         if (handleDuplicates)
         {
-            // A HashSet to track unique keys based on important fields
-            var seenKeys = new HashSet<(string, string, string?)>();
+            // Dictionary tracks the BEST record seen so far per key (lowest CurBal wins).
+            // Key: (AccNum, CustomerID, DisbursementDate)
+            // Value: the record currently kept as the clean version
+            var seenKeys = new Dictionary<(string, string, string?), IndividualContext>();
             processedExcelRecords = new List<IndividualContext>();
 
-            // Iterate through the Excel records
             foreach (var record in fromExcelFile)
             {
-                // Define a composite key based on CreditFacilityAccNum, CustomerID, and DisbursementDate
-                var key = (NormalizeAccountNumber(record.CreditFacilityAccNum?.Data), NormalizeCustomerId(record.CustomerID?.Data), record.DisbursementDate?.Data);
+                var key = (
+                    NormalizeAccountNumber(record.CreditFacilityAccNum?.Data),
+                    NormalizeCustomerId(record.CustomerID?.Data),
+                    record.DisbursementDate?.Data
+                );
 
-                // Overdraft facilities (CreditFacilityType = "V") legitimately appear multiple times
-                // with different disbursement dates — exempt them from the disbursement-date duplicate rule.
-                bool isOverdraft = (record.CreditFacilityType?.Data ?? string.Empty).Trim().ToUpperInvariant() == "V";
+                // Overdraft facilities legitimately appear multiple times — exempt from duplicate rule
+                bool isOverdraft = (record.CreditFacilityType?.Data ?? string.Empty)
+                    .Trim().ToUpperInvariant() == "V";
 
-                // Check for duplicates: same key and no prior duplicate DOB issue flagged
-                if (seenKeys.Contains(key) && string.IsNullOrWhiteSpace(record.DuplicateDoBIssues) && !isOverdraft)
+                if (seenKeys.TryGetValue(key, out var existing) &&
+                    string.IsNullOrWhiteSpace(record.DuplicateDoBIssues) && !isOverdraft)
                 {
-                    duplicatesList.Add(record); // Store duplicates separately
+                    // Duplicate found — compare CurBal to decide which to keep
+                    decimal? incomingBal = ParseCurBal(record.CurBal?.Data);
+                    decimal? existingBal = ParseCurBal(existing.CurBal?.Data);
+
+                    bool keepIncoming;
+                    if (incomingBal.HasValue && existingBal.HasValue)
+                        keepIncoming = incomingBal.Value < existingBal.Value;  // lower wins
+                    else if (incomingBal.HasValue && !existingBal.HasValue)
+                        keepIncoming = true;   // known value beats blank
+                    else
+                        keepIncoming = false;  // existing wins if incoming is blank or equal
+
+                    if (keepIncoming)
+                    {
+                        // Swap: existing goes to duplicate sheet, incoming becomes the kept record
+                        duplicatesList.Add(existing);
+                        seenKeys[key] = record;
+                        // Replace existing in processedExcelRecords
+                        var idx = processedExcelRecords.IndexOf(existing);
+                        if (idx >= 0) processedExcelRecords[idx] = record;
+                        else processedExcelRecords.Add(record);
+                    }
+                    else
+                    {
+                        duplicatesList.Add(record); // incoming loses — goes to duplicate sheet
+                    }
                 }
                 else
                 {
-                    seenKeys.Add(key); // Track new unique records
-                    processedExcelRecords.Add(record); // Add to the list of processed records
+                    seenKeys[key] = record;
+                    processedExcelRecords.Add(record);
                 }
             }
         }
         else
         {
-            // If duplicate handling is disabled, process all Excel records as-is
             processedExcelRecords = fromExcelFile.ToList();
         }
 
