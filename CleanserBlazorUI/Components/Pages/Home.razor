@@ -1865,8 +1865,30 @@
             if (distinctCusts > 1)
             {
                 var fieldSummary = string.Join("|", entries.Select(e => e.Field).Distinct().OrderBy(f => f));
+
+                // Tiebreaker: same DOB + same canonical name across all CustomerIDs → same person → Warning
+                var custGroups = entries.GroupBy(e => e.CustID).Select(g => g.First().Rec).ToList();
+                bool samePerson = false;
+                if (custGroups.Count > 1)
+                {
+                    var first      = custGroups[0];
+                    var firstDob   = (first.DateOfBirth?.Data ?? string.Empty).Trim();
+                    var firstCanon = NormaliseNameForComparison(
+                        first.Surname?.Data ?? string.Empty, first.FirstName?.Data ?? string.Empty);
+
+                    samePerson = custGroups.Skip(1).All(other =>
+                    {
+                        var otherDob   = (other.DateOfBirth?.Data ?? string.Empty).Trim();
+                        var otherCanon = NormaliseNameForComparison(
+                            other.Surname?.Data ?? string.Empty, other.FirstName?.Data ?? string.Empty);
+                        return !string.IsNullOrWhiteSpace(firstDob) && firstDob == otherDob &&
+                               !string.IsNullOrWhiteSpace(firstCanon) && IsSameName(firstCanon, otherCanon);
+                    });
+                }
+
+                string flag = samePerson ? $"W:{fieldSummary}" : $"E:{fieldSummary}";
                 foreach (var entry in entries)
-                    entry.Rec.SamePersonalIDDifferentCustomer = $"E:{fieldSummary}";
+                    entry.Rec.SamePersonalIDDifferentCustomer = flag;
             }
         }
 
@@ -2120,9 +2142,6 @@
         }
 
         // ── #12: Same ID value → different CustomerIDs (cross-column aware) ──
-        // An ID value is flagged if it appears under ANY field combination
-        // for more than one distinct CustomerID.
-        // e.g. NatIDNum=125091895 for CustA AND VotersIDNum=125091895 for CustB → flagged
         foreach (var kvp in byIDValue)
         {
             var entries = kvp.Value;
@@ -2134,14 +2153,51 @@
 
             if (distinctCusts > 1)
             {
-                // Build a description of which fields the conflict spans
                 var fieldSummary = string.Join("|", entries
                     .Select(e => e.Field)
                     .Distinct()
                     .OrderBy(f => f));
 
+                // Tiebreaker: check if all distinct CustomerIDs share the same DOB and canonical name
+                // If yes → same physical person with different branch IDs → Warning (CLEAN)
+                // If no  → genuinely different people sharing an ID → Error (UNLOADABLE)
+                var custGroups = entries
+                    .GroupBy(e => e.CustID)
+                    .Select(g => g.First().Rec)
+                    .ToList();
+
+                bool samePerson = false;
+                if (custGroups.Count > 1)
+                {
+                    var first = custGroups[0];
+                    var firstDob   = (first.DateOfBirth?.Data ?? string.Empty).Trim();
+                    var firstCanon = NormaliseNameForComparison(
+                        first.Surname?.Data ?? string.Empty,
+                        first.FirstName?.Data ?? string.Empty);
+
+                    samePerson = custGroups.Skip(1).All(other =>
+                    {
+                        var otherDob   = (other.DateOfBirth?.Data ?? string.Empty).Trim();
+                        var otherCanon = NormaliseNameForComparison(
+                            other.Surname?.Data ?? string.Empty,
+                            other.FirstName?.Data ?? string.Empty);
+
+                        bool dobMatch  = !string.IsNullOrWhiteSpace(firstDob) &&
+                                         !string.IsNullOrWhiteSpace(otherDob) &&
+                                         firstDob == otherDob;
+                        bool nameMatch = !string.IsNullOrWhiteSpace(firstCanon) &&
+                                         !string.IsNullOrWhiteSpace(otherCanon) &&
+                                         IsSameName(firstCanon, otherCanon);
+
+                        return dobMatch && nameMatch;
+                    });
+                }
+
+                // "W" = Warning (same person, different CustomerIDs) → still routes to CLEAN
+                // "E" = Error (different people sharing an ID) → routes to UNLOADABLE
+                string flag = samePerson ? $"W:{fieldSummary}" : $"E:{fieldSummary}";
                 foreach (var entry in entries)
-                    entry.Rec.SamePersonalIDDifferentCustomer = $"E:{fieldSummary}";
+                    entry.Rec.SamePersonalIDDifferentCustomer = flag;
             }
         }
 
@@ -5619,6 +5675,29 @@
                 ic.Surname.Errors = new List<string>() { " SURNAME AND FIRSTNAME ARE MANDATORY AND SHOULD CONTAIN VALID NAMES " };
             }
 
+            // ── Sprint 8: Business keyword detection in IND name fields ───────
+            // If any name field contains a business keyword, the record is for
+            // a company not an individual — flag as unloadable.
+            var combinedName = $"{ic.Surname.Data} {ic.FirstName.Data} {ic.MiddleNames.Data}".Trim();
+            if (!string.IsNullOrWhiteSpace(FilterBusinessKeywords(combinedName)))
+            {
+                ic.Surname.Passed = false;
+                ic.FirstName.Passed = false;
+                AddCellError(ic.Surname,
+                    "INVALID NAME: BUSINESS KEYWORDS DETECTED IN INDIVIDUAL RECORD — USE COMMERCIAL FILE TYPE");
+            }
+
+            // ── Sprint 8: AND in IND name = multiple persons — unloadable ─────
+            // " AND " (space-padded) distinguishes from names like ANDERSON, ANDREW
+            var upperName = combinedName.ToUpperInvariant();
+            if (upperName.Contains(" AND ") || upperName.EndsWith(" AND"))
+            {
+                ic.Surname.Passed = false;
+                ic.FirstName.Passed = false;
+                AddCellError(ic.Surname,
+                    "INVALID NAME: MULTIPLE INDIVIDUALS DETECTED — A FACILITY RECORD MUST BE ASSIGNED TO A SINGLE PERSON");
+            }
+
             var proofOfAddType_proofOfAddNum = stringHelper.ProofOfAddType_ProofOfAddNum(ic.ProofOfAddType.Data, ic.ProofOfAddNum.Data);
             ic.ProofOfAddType = proofOfAddType_proofOfAddNum[0];
             ic.ProofOfAddNum = proofOfAddType_proofOfAddNum[1];
@@ -5957,8 +6036,21 @@
             {
                 string idField = ic.SamePersonalIDDifferentCustomer.Contains(":") ?
                     ic.SamePersonalIDDifferentCustomer.Split(':')[1] : "PERSONAL ID";
-                AddCellError(ic.CustomerID,
-                    $"CROSS-RECORD CONFLICT: {idField} VALUE IS LINKED TO MORE THAN ONE CUSTOMER ID");
+                bool isSamePerson = ic.SamePersonalIDDifferentCustomer.StartsWith("W");
+
+                if (isSamePerson)
+                {
+                    // Same person, different CustomerIDs (matched on DOB + name) → Warning only, stays CLEAN
+                    AddCellError(ic.CustomerID,
+                        $"WARNING — POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS");
+                    // Do NOT set ic.CustomerID.Passed = false — record remains loadable
+                }
+                else
+                {
+                    // Genuinely different people sharing an ID → Error, unloadable
+                    AddCellError(ic.CustomerID,
+                        $"CROSS-RECORD CONFLICT: {idField} VALUE IS LINKED TO MORE THAN ONE CUSTOMER ID");
+                }
             }
 
             // #14 — Same CustomerID linked to different names
