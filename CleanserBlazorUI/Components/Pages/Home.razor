@@ -3620,6 +3620,10 @@
                 else if (typeof(T) == typeof(IndividualContext))
                 {
                     WriteHeaders(ws, wsu, wsd, SpreadSheetHeadersData.Individual, 179);
+                    // Add WARNING column header at col 180 for IND sheets only
+                    ws.Cell(1, 180).Value  = "--------------- Warnings ---------------";
+                    wsu.Cell(1, 180).Value = "--------------- Warnings ---------------";
+                    wsd.Cell(1, 180).Value = "--------------- Warnings ---------------";
                     WriteData(context.OfType<IndividualContext>().ToList(), context_duplicate.OfType<IndividualContext>().ToList(), ws, wsu, wsd);
                 }
                 else if (typeof(T) == typeof(BusinessContextDud))
@@ -4741,6 +4745,21 @@
                     };
                 string allErrors = string.Join(", ", cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
                 ws.Cell(rowIndex, 179).Value = allErrors;
+
+                // ── Sprint 9: WARNING column (col 180) ───────────────────────
+                // Written on both CLEAN and UNL sheets — blank on UNL since
+                // those records have hard errors already. On CLEAN it surfaces
+                // soft warnings (same-person duplicate CustomerID etc.) so
+                // associates can review without the record being blocked.
+                string warningMessage = string.Empty;
+                if (!string.IsNullOrWhiteSpace(individualRow.SamePersonalIDDifferentCustomer) &&
+                    individualRow.SamePersonalIDDifferentCustomer.StartsWith("W"))
+                {
+                    string idField = individualRow.SamePersonalIDDifferentCustomer.Contains(":") ?
+                        individualRow.SamePersonalIDDifferentCustomer.Split(':')[1] : "PERSONAL ID";
+                    warningMessage = $"WARNING — POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS";
+                }
+                ws.Cell(rowIndex, 180).Value = warningMessage;
             }
         }
         else if (row is BusinessContextDud businessDudRow)
