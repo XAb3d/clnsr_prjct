@@ -376,7 +376,7 @@ public class IndividualRef
     public string? DisbursementDate { get; set; } = string.Empty;
     public DateTime CreatedDate { get; set; }
     public DateTime LastUpdatedDate { get; set; }
-    // ── Sprint 5: Personal ID fields for cross-month enrichment tracking ──
+    // ── Sprint 5: Personal ID fields ──────────────────────────────────────────
     public string? NatIDNum     { get; set; } = string.Empty;
     public string? VotersIDNum  { get; set; } = string.Empty;
     public string? DriverLicNum { get; set; } = string.Empty;
@@ -384,6 +384,9 @@ public class IndividualRef
     public string? SSNum        { get; set; } = string.Empty;
     public string? EzwichNum    { get; set; } = string.Empty;
     public string? OtherIDNum   { get; set; } = string.Empty;
+    // ── Sprint 10: Name fields for reference-trust validation ─────────────────
+    public string? Surname    { get; set; } = string.Empty;
+    public string? FirstName  { get; set; } = string.Empty;
 }
 //public class BusinessRef
 //{
