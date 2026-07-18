@@ -14,6 +14,17 @@ public class IndividualContext
     public string SameCustomerIDDifferentName { get; set; } = string.Empty;
     /// <summary>Set to "E" when a non-overdraft duplicate name mismatch is detected.</summary>
     public string DuplicateNameMismatch { get; set; } = string.Empty;
+    // ── Sprint 10: Reference name trust ───────────────────────────────────────
+    /// <summary>
+    /// Canonical name from the reference DB for this record's AccNum+CustomerID+DisbursementDate.
+    /// If set, the validation pass uses it to bypass business keyword / AND checks when
+    /// the current name matches or is a subset of the reference name.
+    /// </summary>
+    public string? ReferenceCanonicalName { get; set; } = null;
+    /// <summary>
+    /// Set when the name was accepted based on reference trust. Written to WARNING column.
+    /// </summary>
+    public string? ReferenceNameTrustNote { get; set; } = null;
     public string UNL_NDIA_OldData { get; set; } = string.Empty;
     public string UNL_natidnum { get; set; } = string.Empty;
     public string UNL_votersidnum { get; set; } = string.Empty;

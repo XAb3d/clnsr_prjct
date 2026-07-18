@@ -142,6 +142,8 @@ public class DataManagementService
             SSNum                = r.SSNum?.Data                ?? string.Empty,
             EzwichNum            = r.EzwichNum?.Data            ?? string.Empty,
             OtherIDNum           = r.OtherIDNum?.Data           ?? string.Empty,
+            Surname              = r.Surname?.Data              ?? string.Empty,
+            FirstName            = r.FirstName?.Data            ?? string.Empty,
         });
         return await SaveExcelDataToDatabaseInd(mapped, fileShortName);
     }

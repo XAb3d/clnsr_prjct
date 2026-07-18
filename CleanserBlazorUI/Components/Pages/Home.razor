@@ -1872,17 +1872,16 @@
                 if (custGroups.Count > 1)
                 {
                     var first      = custGroups[0];
-                    var firstDob   = (first.DateOfBirth?.Data ?? string.Empty).Trim();
-                    var firstCanon = NormaliseNameForComparison(
-                        first.Surname?.Data ?? string.Empty, first.FirstName?.Data ?? string.Empty);
+                    var firstDob = (first.DateOfBirth?.Data ?? string.Empty).Trim();
 
                     samePerson = custGroups.Skip(1).All(other =>
                     {
-                        var otherDob   = (other.DateOfBirth?.Data ?? string.Empty).Trim();
-                        var otherCanon = NormaliseNameForComparison(
+                        var otherDob = (other.DateOfBirth?.Data ?? string.Empty).Trim();
+                        bool dobMatch = !string.IsNullOrWhiteSpace(firstDob) && firstDob == otherDob;
+                        bool nameMatch = IsSameNameFull(
+                            first.Surname?.Data ?? string.Empty, first.FirstName?.Data ?? string.Empty,
                             other.Surname?.Data ?? string.Empty, other.FirstName?.Data ?? string.Empty);
-                        return !string.IsNullOrWhiteSpace(firstDob) && firstDob == otherDob &&
-                               !string.IsNullOrWhiteSpace(firstCanon) && IsSameName(firstCanon, otherCanon);
+                        return dobMatch && nameMatch;
                     });
                 }
 
@@ -1935,36 +1934,54 @@
     //   "ADAMU ABDUL KADIR"  → "ABDULKADIRADAMU"  ✓ same
     //   "ADAMU ABDULKADIR MOHAMMED" → "ABDULKADIRAADAMUMOHAMMED" — superset
     // For superset check: shorter canonical is fully contained in longer one.
+    // ── Name normalisation helpers ────────────────────────────────────────────
+    // Returns letters-only uppercase string for exact/subset matching.
+    // "ADAMU ABDUL-KADIR" → "ADAMUABDULKADIR"
     string NormaliseNameForComparison(string surname, string firstName)
     {
         var raw = $"{surname} {firstName}".ToUpperInvariant();
-        // Remove everything that isn't a letter
-        var lettersOnly = new string(raw.Where(char.IsLetter).ToArray());
-        // Also build a sorted-token version for catching reordered names
+        return new string(raw.Where(char.IsLetter).ToArray());
+    }
+
+    // Returns sorted-token canonical for reordering detection.
+    // "ASIEDU ASARE" and "ASARE ASIEDU" both → "ASAREASIEDU" after sort
+    string NormaliseNameSortedTokens(string surname, string firstName)
+    {
+        var raw = $"{surname} {firstName}".ToUpperInvariant();
         var tokens = raw.Split(new[] { ' ', '-', '\'', '.', ',' },
                                StringSplitOptions.RemoveEmptyEntries)
                         .Select(t => new string(t.Where(char.IsLetter).ToArray()))
                         .Where(t => t.Length > 0)
-                        .OrderBy(t => t)
-                        .ToArray();
-        // Primary key: all letters concatenated (catches hyphen/space variants)
-        // Secondary key: sorted tokens joined (catches reordering)
-        // We return the letters-only form — callers use IsSameName() to compare
-        return lettersOnly;
+                        .OrderBy(t => t);
+        return string.Concat(tokens);
     }
 
-    // Returns true if two name pairs refer to the same person using:
-    // 1. Exact canonical match (letters only, case-insensitive)
-    // 2. Subset match — shorter name is fully contained in longer (dropped middle name)
+    // Returns true if two canonical (letters-only) names match:
+    // 1. Exact match
+    // 2. Subset — shorter contained in longer (dropped middle name)
     bool IsSameName(string canon1, string canon2)
     {
+        if (string.IsNullOrWhiteSpace(canon1) || string.IsNullOrWhiteSpace(canon2)) return false;
         if (canon1 == canon2) return true;
-        // Subset: one name's letters are fully contained within the other
-        // e.g. "ADAMUABDULKADIR" is contained in "ADAMUABDULKADIRMOHAMMED"
-        if (canon1.Length > 0 && canon2.Length > 0)
+        if (canon2.Contains(canon1) || canon1.Contains(canon2)) return true;
+        return false;
+    }
+
+    // Full name comparison using both letters-only AND sorted-token methods.
+    // Catches: hyphen/space variants, dropped middle names, AND reordered names.
+    // "ASIEDU ASARE" vs "ASARE ASIEDU" → sorted tokens both = "ASAREASIEDU" → true
+    bool IsSameNameFull(string surname1, string firstName1, string surname2, string firstName2)
+    {
+        var canon1  = NormaliseNameForComparison(surname1, firstName1);
+        var canon2  = NormaliseNameForComparison(surname2, firstName2);
+        if (IsSameName(canon1, canon2)) return true;
+
+        var sorted1 = NormaliseNameSortedTokens(surname1, firstName1);
+        var sorted2 = NormaliseNameSortedTokens(surname2, firstName2);
+        if (sorted1.Length > 0 && sorted2.Length > 0)
         {
-            if (canon2.Contains(canon1) || canon1.Contains(canon2))
-                return true;
+            if (sorted1 == sorted2) return true;
+            if (sorted2.Contains(sorted1) || sorted1.Contains(sorted2)) return true;
         }
         return false;
     }
@@ -1993,15 +2010,9 @@
                 for (int j = i + 1; j < records.Count; j++)
                 {
                     var a = records[i]; var b = records[j];
-                    var canonA = NormaliseNameForComparison(
-                        a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty);
-                    var canonB = NormaliseNameForComparison(
-                        b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty);
-
-                    if (string.IsNullOrWhiteSpace(canonA) || string.IsNullOrWhiteSpace(canonB))
-                        continue;
-
-                    if (!IsSameName(canonA, canonB))
+                    if (!IsSameNameFull(
+                            a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty,
+                            b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty))
                     {
                         // Names differ — check DOB as tiebreaker
                         var dobA = (a.DateOfBirth?.Data ?? string.Empty).Trim();
@@ -2170,25 +2181,17 @@
                 if (custGroups.Count > 1)
                 {
                     var first = custGroups[0];
-                    var firstDob   = (first.DateOfBirth?.Data ?? string.Empty).Trim();
-                    var firstCanon = NormaliseNameForComparison(
-                        first.Surname?.Data ?? string.Empty,
-                        first.FirstName?.Data ?? string.Empty);
+                    var firstDob = (first.DateOfBirth?.Data ?? string.Empty).Trim();
 
                     samePerson = custGroups.Skip(1).All(other =>
                     {
-                        var otherDob   = (other.DateOfBirth?.Data ?? string.Empty).Trim();
-                        var otherCanon = NormaliseNameForComparison(
-                            other.Surname?.Data ?? string.Empty,
-                            other.FirstName?.Data ?? string.Empty);
-
-                        bool dobMatch  = !string.IsNullOrWhiteSpace(firstDob) &&
-                                         !string.IsNullOrWhiteSpace(otherDob) &&
-                                         firstDob == otherDob;
-                        bool nameMatch = !string.IsNullOrWhiteSpace(firstCanon) &&
-                                         !string.IsNullOrWhiteSpace(otherCanon) &&
-                                         IsSameName(firstCanon, otherCanon);
-
+                        var otherDob = (other.DateOfBirth?.Data ?? string.Empty).Trim();
+                        bool dobMatch = !string.IsNullOrWhiteSpace(firstDob) &&
+                                        !string.IsNullOrWhiteSpace(otherDob) &&
+                                        firstDob == otherDob;
+                        bool nameMatch = IsSameNameFull(
+                            first.Surname?.Data  ?? string.Empty, first.FirstName?.Data  ?? string.Empty,
+                            other.Surname?.Data  ?? string.Empty, other.FirstName?.Data  ?? string.Empty);
                         return dobMatch && nameMatch;
                     });
                 }
@@ -2479,6 +2482,17 @@
                 // Found matching record in the database
                 var excelDob = excelRecord.DateOfBirth?.Data;
                 __matchdata++;
+
+                // ── Sprint 10: Store reference canonical name for validation pass ──
+                // If the reference has name data, record it so the validation pass
+                // can trust names that were accepted in the previous clean.
+                if (!string.IsNullOrWhiteSpace(dbRecord.Surname) || !string.IsNullOrWhiteSpace(dbRecord.FirstName))
+                {
+                    excelRecord.ReferenceCanonicalName =
+                        NormaliseNameSortedTokens(
+                            dbRecord.Surname  ?? string.Empty,
+                            dbRecord.FirstName ?? string.Empty);
+                }
 
                 // Check if DisbursementDate matches
                 if (dbRecord.DisbursementDate != disbursementDate)
@@ -4746,20 +4760,27 @@
                 string allErrors = string.Join(", ", cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
                 ws.Cell(rowIndex, 179).Value = allErrors;
 
-                // ── Sprint 9: WARNING column (col 180) ───────────────────────
-                // Written on both CLEAN and UNL sheets — blank on UNL since
-                // those records have hard errors already. On CLEAN it surfaces
-                // soft warnings (same-person duplicate CustomerID etc.) so
-                // associates can review without the record being blocked.
-                string warningMessage = string.Empty;
+                // ── Sprint 9/10: WARNING column (col 180) ────────────────────
+                // Surfaces soft warnings so associates can review without records being blocked.
+                var warningParts = new List<string>();
+
+                // Same-person duplicate CustomerID warning
                 if (!string.IsNullOrWhiteSpace(individualRow.SamePersonalIDDifferentCustomer) &&
                     individualRow.SamePersonalIDDifferentCustomer.StartsWith("W"))
                 {
                     string idField = individualRow.SamePersonalIDDifferentCustomer.Contains(":") ?
                         individualRow.SamePersonalIDDifferentCustomer.Split(':')[1] : "PERSONAL ID";
-                    warningMessage = $"WARNING — POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS";
+                    warningParts.Add(
+                        $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS");
                 }
-                ws.Cell(rowIndex, 180).Value = warningMessage;
+
+                // Reference name trust note
+                if (!string.IsNullOrWhiteSpace(individualRow.ReferenceNameTrustNote))
+                    warningParts.Add(individualRow.ReferenceNameTrustNote);
+
+                ws.Cell(rowIndex, 180).Value = warningParts.Count > 0
+                    ? string.Join(" | ", warningParts)
+                    : string.Empty;
             }
         }
         else if (row is BusinessContextDud businessDudRow)
@@ -5697,24 +5718,53 @@
             // ── Sprint 8: Business keyword detection in IND name fields ───────
             // If any name field contains a business keyword, the record is for
             // a company not an individual — flag as unloadable.
+            // EXCEPTION: if this record matched the reference and the name is
+            // consistent with what was previously accepted → trust it (it was
+            // manually reviewed and cleaned last month).
             var combinedName = $"{ic.Surname.Data} {ic.FirstName.Data} {ic.MiddleNames.Data}".Trim();
-            if (!string.IsNullOrWhiteSpace(FilterBusinessKeywords(combinedName)))
+            var upperName = combinedName.ToUpperInvariant();
+
+            bool nameValidatedByReference = false;
+            if (!string.IsNullOrWhiteSpace(ic.ReferenceCanonicalName))
             {
-                ic.Surname.Passed = false;
-                ic.FirstName.Passed = false;
-                AddCellError(ic.Surname,
-                    "INVALID NAME: BUSINESS KEYWORDS DETECTED IN INDIVIDUAL RECORD — USE COMMERCIAL FILE TYPE");
+                var currentSorted = NormaliseNameSortedTokens(
+                    ic.Surname?.Data ?? string.Empty,
+                    ic.FirstName?.Data ?? string.Empty);
+                // Trust if current name matches or is a subset of reference name
+                if (!string.IsNullOrWhiteSpace(currentSorted) &&
+                    (currentSorted == ic.ReferenceCanonicalName ||
+                     ic.ReferenceCanonicalName.Contains(currentSorted) ||
+                     currentSorted.Contains(ic.ReferenceCanonicalName)))
+                {
+                    nameValidatedByReference = true;
+                }
             }
 
-            // ── Sprint 8: AND in IND name = multiple persons — unloadable ─────
-            // " AND " (space-padded) distinguishes from names like ANDERSON, ANDREW
-            var upperName = combinedName.ToUpperInvariant();
-            if (upperName.Contains(" AND ") || upperName.EndsWith(" AND"))
+            if (!nameValidatedByReference)
             {
-                ic.Surname.Passed = false;
-                ic.FirstName.Passed = false;
-                AddCellError(ic.Surname,
-                    "INVALID NAME: MULTIPLE INDIVIDUALS DETECTED — A FACILITY RECORD MUST BE ASSIGNED TO A SINGLE PERSON");
+                if (!string.IsNullOrWhiteSpace(FilterBusinessKeywords(combinedName)))
+                {
+                    ic.Surname.Passed = false;
+                    ic.FirstName.Passed = false;
+                    AddCellError(ic.Surname,
+                        "INVALID NAME: BUSINESS KEYWORDS DETECTED IN INDIVIDUAL RECORD — USE COMMERCIAL FILE TYPE");
+                }
+
+                // ── Sprint 8: AND in IND name = multiple persons — unloadable ─
+                if (upperName.Contains(" AND ") || upperName.EndsWith(" AND"))
+                {
+                    ic.Surname.Passed = false;
+                    ic.FirstName.Passed = false;
+                    AddCellError(ic.Surname,
+                        "INVALID NAME: MULTIPLE INDIVIDUALS DETECTED — A FACILITY RECORD MUST BE ASSIGNED TO A SINGLE PERSON");
+                }
+            }
+            else
+            {
+                // Name passed by reference — add a note in the WARNING column
+                // so associates know this record was trusted from last month's clean
+                if (string.IsNullOrWhiteSpace(ic.ReferenceNameTrustNote))
+                    ic.ReferenceNameTrustNote = "REFERENCE MATCH — NAME ACCEPTED FROM PREVIOUS CLEAN";
             }
 
             var proofOfAddType_proofOfAddNum = stringHelper.ProofOfAddType_ProofOfAddNum(ic.ProofOfAddType.Data, ic.ProofOfAddNum.Data);
