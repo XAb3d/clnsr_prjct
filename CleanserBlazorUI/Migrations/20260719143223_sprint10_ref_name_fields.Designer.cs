@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CleanserBlazorUI.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260718232342_sprint10_ref_name_fields")]
+    [Migration("20260719143223_sprint10_ref_name_fields")]
     partial class sprint10_ref_name_fields
     {
         /// <inheritdoc />

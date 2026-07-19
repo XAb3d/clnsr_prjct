@@ -189,6 +189,9 @@ namespace CleanserBlazorUI.Migrations
                     b.Property<string>("EzwichNum")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("FirstName")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<DateTime>("LastUpdatedDate")
                         .HasColumnType("datetime2");
 
@@ -206,6 +209,9 @@ namespace CleanserBlazorUI.Migrations
 
                     b.Property<string>("SubscriberCode")
                         .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Surname")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("VotersIDNum")
