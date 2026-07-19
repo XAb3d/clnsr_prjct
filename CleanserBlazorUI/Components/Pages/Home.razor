@@ -4761,26 +4761,11 @@
                 ws.Cell(rowIndex, 179).Value = allErrors;
 
                 // ── Sprint 9/10: WARNING column (col 180) ────────────────────
-                // Surfaces soft warnings so associates can review without records being blocked.
-                var warningParts = new List<string>();
-
-                // Same-person duplicate CustomerID warning
-                if (!string.IsNullOrWhiteSpace(individualRow.SamePersonalIDDifferentCustomer) &&
-                    individualRow.SamePersonalIDDifferentCustomer.StartsWith("W"))
-                {
-                    string idField = individualRow.SamePersonalIDDifferentCustomer.Contains(":") ?
-                        individualRow.SamePersonalIDDifferentCustomer.Split(':')[1] : "PERSONAL ID";
-                    warningParts.Add(
-                        $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS");
-                }
-
-                // Reference name trust note
-                if (!string.IsNullOrWhiteSpace(individualRow.ReferenceNameTrustNote))
-                    warningParts.Add(individualRow.ReferenceNameTrustNote);
-
-                ws.Cell(rowIndex, 180).Value = warningParts.Count > 0
-                    ? string.Join(" | ", warningParts)
-                    : string.Empty;
+                // ReferenceNameTrustNote carries ALL soft warning messages:
+                //   - POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON
+                //   - REFERENCE MATCH — NAME ACCEPTED FROM PREVIOUS CLEAN
+                // Written here so it appears on CLEAN sheet for associate review.
+                ws.Cell(rowIndex, 180).Value = individualRow.ReferenceNameTrustNote ?? string.Empty;
             }
         }
         else if (row is BusinessContextDud businessDudRow)
@@ -6109,10 +6094,13 @@
 
                 if (isSamePerson)
                 {
-                    // Same person, different CustomerIDs (matched on DOB + name) → Warning only, stays CLEAN
-                    AddCellError(ic.CustomerID,
-                        $"WARNING — POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS");
-                    // Do NOT set ic.CustomerID.Passed = false — record remains loadable
+                    // Same person, different CustomerIDs — stays CLEAN.
+                    // Do NOT use AddCellError (it sets Passed=false → UNL).
+                    // Write warning message directly to the WARNING column via ReferenceNameTrustNote.
+                    var warningMsg = $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS";
+                    ic.ReferenceNameTrustNote = string.IsNullOrWhiteSpace(ic.ReferenceNameTrustNote)
+                        ? warningMsg
+                        : ic.ReferenceNameTrustNote + " | " + warningMsg;
                 }
                 else
                 {
