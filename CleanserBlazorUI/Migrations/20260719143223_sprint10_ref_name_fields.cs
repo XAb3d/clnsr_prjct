@@ -10,29 +10,15 @@ namespace CleanserBlazorUI.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "FirstName",
-                table: "IndividualsData",
-                type: "nvarchar(max)",
-                nullable: true);
-
-            migrationBuilder.AddColumn<string>(
-                name: "Surname",
-                table: "IndividualsData",
-                type: "nvarchar(max)",
-                nullable: true);
+            // Surname and FirstName columns already exist in IndividualsData
+            // (added directly to the DB prior to this migration being generated).
+            // No action needed — migration marked as applied to keep EF in sync.
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "FirstName",
-                table: "IndividualsData");
-
-            migrationBuilder.DropColumn(
-                name: "Surname",
-                table: "IndividualsData");
+            // Columns retained on rollback — removing them could cause data loss.
         }
     }
 }
