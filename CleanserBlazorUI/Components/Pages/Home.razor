@@ -1820,15 +1820,23 @@
         return _fromExcelFile;
     }
 
-    // ── Issue #12 ─────────────────────────────────────────────────────────────
-    // Same ID VALUE (across any of the 7 ID fields) mapped to more than one
-    // distinct CustomerID. Cross-column aware: NatIDNum on rec A matching
-    // VotersIDNum on rec B is detected and flagged.
+    // ── Issue #12 — Same ID value: DOB + token name check (Sprint 11) ─────────
+    // An ID value shared across different CustomerIDs is acceptable ONLY if
+    // DOB and name (≥2 of 3 tokens) match across all records.
+    // Also validates NatID/GhanaCard format.
     List<IndividualContext> CheckSamePersonalIDDifferentCustomer(List<IndividualContext> list)
     {
         if (list == null) throw new ArgumentNullException(nameof(list));
 
-        // Build cross-column ID value index
+        // ── GhanaCard / NatID format check ───────────────────────────────────
+        foreach (var rec in list)
+        {
+            var natId = rec.NatIDNum?.Data ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(natId) && !IsValidNatIDFormat(natId))
+                rec.NatIDFormatInvalid = "E";
+        }
+
+        // ── Cross-record ID conflict check ────────────────────────────────────
         var byIDValue = new Dictionary<string, List<(string CustID, string Field, IndividualContext Rec)>>();
 
         var idSelectors = new List<(string FieldName, Func<IndividualContext, string?> GetValue)>
@@ -1846,7 +1854,6 @@
         {
             var custId = NormalizeCustomerId(rec.CustomerID?.Data);
             if (string.IsNullOrWhiteSpace(custId)) continue;
-
             foreach (var (fieldName, getValue) in idSelectors)
             {
                 var value = getValue(rec);
@@ -1862,37 +1869,71 @@
         {
             var entries = kvp.Value;
             var distinctCusts = entries.Select(e => e.CustID).Distinct().Count();
-            if (distinctCusts > 1)
+            if (distinctCusts < 2) continue;
+
+            var fieldSummary = string.Join("|", entries.Select(e => e.Field).Distinct().OrderBy(f => f));
+
+            // Get one representative record per distinct CustomerID for comparison
+            var custGroups = entries
+                .GroupBy(e => e.CustID)
+                .Select(g => g.First().Rec)
+                .ToList();
+
+            var first    = custGroups[0];
+            var firstDob = (first.DateOfBirth?.Data ?? string.Empty).Trim();
+
+            // Step 1: DOB check
+            bool dobConflict = custGroups.Skip(1).Any(other =>
             {
-                var fieldSummary = string.Join("|", entries.Select(e => e.Field).Distinct().OrderBy(f => f));
+                var dob = (other.DateOfBirth?.Data ?? string.Empty).Trim();
+                return !string.IsNullOrWhiteSpace(firstDob) &&
+                       !string.IsNullOrWhiteSpace(dob) &&
+                       dob != firstDob;
+            });
 
-                // Tiebreaker: same DOB + same canonical name across all CustomerIDs → same person → Warning
-                var custGroups = entries.GroupBy(e => e.CustID).Select(g => g.First().Rec).ToList();
-                bool samePerson = false;
-                if (custGroups.Count > 1)
+            if (dobConflict)
+            {
+                foreach (var e in entries)
+                    e.Rec.SamePersonalIDDifferentCustomer = $"E:DOB:{fieldSummary}";
+                continue;
+            }
+
+            // Step 2: Name token check
+            bool nameConflict = false;
+            bool misspell     = false;
+            for (int i = 0; i < custGroups.Count && !nameConflict; i++)
+            {
+                for (int j = i + 1; j < custGroups.Count && !nameConflict; j++)
                 {
-                    var first      = custGroups[0];
-                    var firstDob = (first.DateOfBirth?.Data ?? string.Empty).Trim();
+                    var a = custGroups[i]; var b = custGroups[j];
+                    var (matches, maxTokens, isSame) = CompareNameTokens(
+                        a.Surname?.Data   ?? string.Empty,
+                        a.FirstName?.Data ?? string.Empty,
+                        a.MiddleNames?.Data ?? string.Empty,
+                        b.Surname?.Data   ?? string.Empty,
+                        b.FirstName?.Data ?? string.Empty,
+                        b.MiddleNames?.Data ?? string.Empty);
 
-                    samePerson = custGroups.Skip(1).All(other =>
-                    {
-                        var otherDob = (other.DateOfBirth?.Data ?? string.Empty).Trim();
-                        bool dobMatch = !string.IsNullOrWhiteSpace(firstDob) && firstDob == otherDob;
-                        bool nameMatch = IsSameNameFull(
-                            first.Surname?.Data ?? string.Empty, first.FirstName?.Data ?? string.Empty,
-                            other.Surname?.Data ?? string.Empty, other.FirstName?.Data ?? string.Empty);
-                        return dobMatch && nameMatch;
-                    });
+                    if (!isSame) { nameConflict = true; misspell = matches > 0; }
                 }
+            }
 
-                string flag = samePerson ? $"W:{fieldSummary}" : $"E:{fieldSummary}";
-                foreach (var entry in entries)
-                    entry.Rec.SamePersonalIDDifferentCustomer = flag;
+            if (nameConflict)
+            {
+                string flag = misspell
+                    ? $"E:MISSPELL:{fieldSummary}"
+                    : $"E:NAME:{fieldSummary}";
+                foreach (var e in entries) e.Rec.SamePersonalIDDifferentCustomer = flag;
+            }
+            else
+            {
+                // DOB and name match — same person, different CustomerIDs → Warning
+                string flag = $"W:{fieldSummary}";
+                foreach (var e in entries) e.Rec.SamePersonalIDDifferentCustomer = flag;
             }
         }
 
         return list;
-    }
 
     // ── Issue #14 ─────────────────────────────────────────────────────────────
     // Same CustomerID linked to more than one distinct name cluster across records.
@@ -1934,7 +1975,53 @@
     //   "ADAMU ABDUL KADIR"  → "ABDULKADIRADAMU"  ✓ same
     //   "ADAMU ABDULKADIR MOHAMMED" → "ABDULKADIRAADAMUMOHAMMED" — superset
     // For superset check: shorter canonical is fully contained in longer one.
-    // ── Name normalisation helpers ────────────────────────────────────────────
+    // ── Token-based name match (Sprint 11) ───────────────────────────────────
+    // Extracts all letter tokens from all three name fields combined,
+    // then counts how many tokens the two name sets share exactly.
+    // Rule: if max tokens across both sides >= 3, need >= 2 matches.
+    //       if max tokens across both sides <= 2, need >= 1 match.
+    // Returns (matchCount, maxTokens, isSamePerson)
+    (int matches, int maxTokens, bool isSame) CompareNameTokens(
+        string surname1, string firstName1, string middle1,
+        string surname2, string firstName2, string middle2)
+    {
+        HashSet<string> Tokenise(string s, string f, string m)
+        {
+            var raw = $"{s} {f} {m}".ToUpperInvariant();
+            return raw.Split(new[] { ' ', '-', '\'', '.', ',' },
+                             StringSplitOptions.RemoveEmptyEntries)
+                      .Select(t => new string(t.Where(char.IsLetter).ToArray()))
+                      .Where(t => t.Length > 0)
+                      .ToHashSet();
+        }
+
+        var tokens1 = Tokenise(surname1, firstName1, middle1);
+        var tokens2 = Tokenise(surname2, firstName2, middle2);
+
+        int matches   = tokens1.Count(t => tokens2.Contains(t));
+        int maxTokens = Math.Max(tokens1.Count, tokens2.Count);
+        bool isSame   = maxTokens >= 3 ? matches >= 2 : matches >= 1;
+
+        return (matches, maxTokens, isSame);
+    }
+
+    // ── GhanaCard / NatID format validator (Sprint 11) ───────────────────────
+    // Valid format: 3-letter country prefix + exactly 10 alphanumeric characters
+    // Supported prefixes: GHA, NGA, CIV (expandable)
+    static readonly HashSet<string> _natIDPrefixes =
+        new(StringComparer.OrdinalIgnoreCase) { "GHA", "NGA", "CIV" };
+
+    bool IsValidNatIDFormat(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return true; // blank is handled elsewhere
+        var v = value.Trim().ToUpperInvariant();
+        // Strip common separators (GHA-7151264541 or GHA7151264541)
+        var clean = v.Replace("-", "").Replace(" ", "");
+        if (clean.Length != 13) return false;
+        var prefix = clean.Substring(0, 3);
+        var digits = clean.Substring(3);
+        return _natIDPrefixes.Contains(prefix) && digits.All(char.IsLetterOrDigit);
+    }
     // Returns letters-only uppercase string for exact/subset matching.
     // "ADAMU ABDUL-KADIR" → "ADAMUABDULKADIR"
     string NormaliseNameForComparison(string surname, string firstName)
@@ -1986,11 +2073,10 @@
         return false;
     }
 
-    // ── Issue #14 ─────────────────────────────────────────────────────────────
-    // Same CustomerID linked to more than one distinct name cluster across records.
-    // Uses canonical name comparison + DOB tiebreaker.
-    // Rule: if canonical names differ BUT DOB matches → same person, no flag.
-    //       if canonical names differ AND DOB differs  → genuine conflict, flag.
+    // ── Issue #14 — Same CustomerID: DOB + name conflict detection ───────────
+    // Rule: same CustomerID must always refer to the same person.
+    // Step 1: DOBs differ → UNLOADABLE (SameCustomerIDDifferentDOB = "E")
+    // Step 2: names differ by token rule → UNLOADABLE (SameCustomerIDDifferentName = "E")
     List<IndividualContext> CheckSameCustomerIDDifferentName(List<IndividualContext> list)
     {
         if (list == null) throw new ArgumentNullException(nameof(list));
@@ -2001,38 +2087,55 @@
 
         foreach (var grp in groups)
         {
-            // Get canonical name per record
             var records = grp.ToList();
-            bool hasConflict = false;
+            if (records.Count < 2) continue;
 
-            for (int i = 0; i < records.Count; i++)
+            var firstDob = (records[0].DateOfBirth?.Data ?? string.Empty).Trim();
+
+            // Step 1: DOB check — any mismatch → flag all
+            bool dobConflict = records.Skip(1).Any(r =>
             {
-                for (int j = i + 1; j < records.Count; j++)
-                {
-                    var a = records[i]; var b = records[j];
-                    if (!IsSameNameFull(
-                            a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty,
-                            b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty))
-                    {
-                        // Names differ — check DOB as tiebreaker
-                        var dobA = (a.DateOfBirth?.Data ?? string.Empty).Trim();
-                        var dobB = (b.DateOfBirth?.Data ?? string.Empty).Trim();
-                        bool dobMatch = !string.IsNullOrWhiteSpace(dobA) &&
-                                        !string.IsNullOrWhiteSpace(dobB) &&
-                                        dobA == dobB;
-                        if (!dobMatch)
-                        {
-                            hasConflict = true;
-                            break;
-                        }
-                    }
-                }
-                if (hasConflict) break;
+                var dob = (r.DateOfBirth?.Data ?? string.Empty).Trim();
+                return !string.IsNullOrWhiteSpace(firstDob) &&
+                       !string.IsNullOrWhiteSpace(dob) &&
+                       dob != firstDob;
+            });
+
+            if (dobConflict)
+            {
+                foreach (var r in records) r.SameCustomerIDDifferentDOB = "E";
+                continue;
             }
 
-            if (hasConflict)
-                foreach (var rec in records)
-                    rec.SameCustomerIDDifferentName = "E";
+            // Step 2: Name token check
+            bool nameConflict = false;
+            bool misspell = false;
+            for (int i = 0; i < records.Count && !nameConflict; i++)
+            {
+                for (int j = i + 1; j < records.Count && !nameConflict; j++)
+                {
+                    var a = records[i]; var b = records[j];
+                    var (matches, maxTokens, isSame) = CompareNameTokens(
+                        a.Surname?.Data ?? string.Empty,
+                        a.FirstName?.Data ?? string.Empty,
+                        a.MiddleNames?.Data ?? string.Empty,
+                        b.Surname?.Data ?? string.Empty,
+                        b.FirstName?.Data ?? string.Empty,
+                        b.MiddleNames?.Data ?? string.Empty);
+
+                    if (!isSame)
+                    {
+                        nameConflict = true;
+                        misspell = matches > 0;
+                    }
+                }
+            }
+
+            if (nameConflict)
+            {
+                string flag = misspell ? "E:MISSPELL" : "E";
+                foreach (var r in records) r.SameCustomerIDDifferentName = flag;
+            }
         }
 
         return list;
@@ -2152,85 +2255,89 @@
             IndexIDValue(rec.OtherIDNum?.Data,   "OtherIDNum",   custId, rec);
         }
 
-        // ── #12: Same ID value → different CustomerIDs (cross-column aware) ──
+        // ── #12: Same ID value → different CustomerIDs — DOB + token name check ──
         foreach (var kvp in byIDValue)
         {
             var entries = kvp.Value;
             var distinctCusts = entries
                 .Where(e => !string.IsNullOrWhiteSpace(e.CustID))
-                .Select(e => e.CustID)
-                .Distinct()
-                .Count();
+                .Select(e => e.CustID).Distinct().Count();
+            if (distinctCusts < 2) continue;
 
-            if (distinctCusts > 1)
+            var fieldSummary = string.Join("|", entries.Select(e => e.Field).Distinct().OrderBy(f => f));
+            var custGroups   = entries.GroupBy(e => e.CustID).Select(g => g.First().Rec).ToList();
+            var first12      = custGroups[0];
+            var firstDob12   = (first12.DateOfBirth?.Data ?? string.Empty).Trim();
+
+            // Step 1: DOB check
+            bool dobConflict12 = custGroups.Skip(1).Any(o => {
+                var d = (o.DateOfBirth?.Data ?? string.Empty).Trim();
+                return !string.IsNullOrWhiteSpace(firstDob12) && !string.IsNullOrWhiteSpace(d) && d != firstDob12;
+            });
+            if (dobConflict12)
             {
-                var fieldSummary = string.Join("|", entries
-                    .Select(e => e.Field)
-                    .Distinct()
-                    .OrderBy(f => f));
+                foreach (var e in entries) e.Rec.SamePersonalIDDifferentCustomer = $"E:DOB:{fieldSummary}";
+                continue;
+            }
 
-                // Tiebreaker: check if all distinct CustomerIDs share the same DOB and canonical name
-                // If yes → same physical person with different branch IDs → Warning (CLEAN)
-                // If no  → genuinely different people sharing an ID → Error (UNLOADABLE)
-                var custGroups = entries
-                    .GroupBy(e => e.CustID)
-                    .Select(g => g.First().Rec)
-                    .ToList();
-
-                bool samePerson = false;
-                if (custGroups.Count > 1)
+            // Step 2: Token name check
+            bool nameConflict12 = false; bool misspell12 = false;
+            for (int i = 0; i < custGroups.Count && !nameConflict12; i++)
+                for (int j = i + 1; j < custGroups.Count && !nameConflict12; j++)
                 {
-                    var first = custGroups[0];
-                    var firstDob = (first.DateOfBirth?.Data ?? string.Empty).Trim();
-
-                    samePerson = custGroups.Skip(1).All(other =>
-                    {
-                        var otherDob = (other.DateOfBirth?.Data ?? string.Empty).Trim();
-                        bool dobMatch = !string.IsNullOrWhiteSpace(firstDob) &&
-                                        !string.IsNullOrWhiteSpace(otherDob) &&
-                                        firstDob == otherDob;
-                        bool nameMatch = IsSameNameFull(
-                            first.Surname?.Data  ?? string.Empty, first.FirstName?.Data  ?? string.Empty,
-                            other.Surname?.Data  ?? string.Empty, other.FirstName?.Data  ?? string.Empty);
-                        return dobMatch && nameMatch;
-                    });
+                    var (matches12, _, isSame12) = CompareNameTokens(
+                        custGroups[i].Surname?.Data    ?? string.Empty,
+                        custGroups[i].FirstName?.Data  ?? string.Empty,
+                        custGroups[i].MiddleNames?.Data ?? string.Empty,
+                        custGroups[j].Surname?.Data    ?? string.Empty,
+                        custGroups[j].FirstName?.Data  ?? string.Empty,
+                        custGroups[j].MiddleNames?.Data ?? string.Empty);
+                    if (!isSame12) { nameConflict12 = true; misspell12 = matches12 > 0; }
                 }
 
-                // "W" = Warning (same person, different CustomerIDs) → still routes to CLEAN
-                // "E" = Error (different people sharing an ID) → routes to UNLOADABLE
-                string flag = samePerson ? $"W:{fieldSummary}" : $"E:{fieldSummary}";
-                foreach (var entry in entries)
-                    entry.Rec.SamePersonalIDDifferentCustomer = flag;
-            }
+            string flag12 = nameConflict12
+                ? (misspell12 ? $"E:MISSPELL:{fieldSummary}" : $"E:NAME:{fieldSummary}")
+                : $"W:{fieldSummary}";
+            foreach (var entry in entries)
+                entry.Rec.SamePersonalIDDifferentCustomer = flag12;
         }
 
-        // ── #14: Same CustomerID → different name clusters ────────────────────
+        // ── #14: Same CustomerID — DOB check then token name check ─────────────
         foreach (var grp in byCustomerID.Values)
         {
             var records = grp.ToList();
-            bool hasConflict = false;
-            for (int i = 0; i < records.Count && !hasConflict; i++)
+            if (records.Count < 2) continue;
+
+            var firstDob = (records[0].DateOfBirth?.Data ?? string.Empty).Trim();
+            bool dobConflict = records.Skip(1).Any(r => {
+                var d = (r.DateOfBirth?.Data ?? string.Empty).Trim();
+                return !string.IsNullOrWhiteSpace(firstDob) && !string.IsNullOrWhiteSpace(d) && d != firstDob;
+            });
+            if (dobConflict)
             {
-                for (int j = i + 1; j < records.Count && !hasConflict; j++)
-                {
-                    var a = records[i]; var b = records[j];
-                    var canonA = NormaliseNameForComparison(
-                        a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty);
-                    var canonB = NormaliseNameForComparison(
-                        b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty);
-                    if (string.IsNullOrWhiteSpace(canonA) || string.IsNullOrWhiteSpace(canonB)) continue;
-                    if (!IsSameName(canonA, canonB))
-                    {
-                        var dobA = (a.DateOfBirth?.Data ?? string.Empty).Trim();
-                        var dobB = (b.DateOfBirth?.Data ?? string.Empty).Trim();
-                        bool dobMatch = !string.IsNullOrWhiteSpace(dobA) &&
-                                        !string.IsNullOrWhiteSpace(dobB) && dobA == dobB;
-                        if (!dobMatch) hasConflict = true;
-                    }
-                }
+                foreach (var r in records) r.SameCustomerIDDifferentDOB = "E";
+                continue;
             }
-            if (hasConflict)
-                foreach (var r in records) r.SameCustomerIDDifferentName = "E";
+
+            bool nameConflict = false; bool misspell = false;
+            for (int i = 0; i < records.Count && !nameConflict; i++)
+                for (int j = i + 1; j < records.Count && !nameConflict; j++)
+                {
+                    var (matches, _, isSame) = CompareNameTokens(
+                        records[i].Surname?.Data ?? string.Empty,
+                        records[i].FirstName?.Data ?? string.Empty,
+                        records[i].MiddleNames?.Data ?? string.Empty,
+                        records[j].Surname?.Data ?? string.Empty,
+                        records[j].FirstName?.Data ?? string.Empty,
+                        records[j].MiddleNames?.Data ?? string.Empty);
+                    if (!isSame) { nameConflict = true; misspell = matches > 0; }
+                }
+
+            if (nameConflict)
+            {
+                string flag = misspell ? "E:MISSPELL" : "E";
+                foreach (var r in records) r.SameCustomerIDDifferentName = flag;
+            }
         }
 
         // ── #2: Same AccNum+CustomerID → different name clusters ──────────────
@@ -4761,11 +4868,28 @@
                 ws.Cell(rowIndex, 179).Value = allErrors;
 
                 // ── Sprint 9/10: WARNING column (col 180) ────────────────────
-                // ReferenceNameTrustNote carries ALL soft warning messages:
-                //   - POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON
-                //   - REFERENCE MATCH — NAME ACCEPTED FROM PREVIOUS CLEAN
-                // Written here so it appears on CLEAN sheet for associate review.
-                ws.Cell(rowIndex, 180).Value = individualRow.ReferenceNameTrustNote ?? string.Empty;
+                // Build warning from ALL soft warning sources directly here
+                // so it's guaranteed to appear regardless of ISCleaned order.
+                var warningParts = new List<string>();
+
+                // Same-person duplicate CustomerID warning (set by cross-record checks)
+                if (!string.IsNullOrWhiteSpace(individualRow.SamePersonalIDDifferentCustomer) &&
+                    individualRow.SamePersonalIDDifferentCustomer.StartsWith("W"))
+                {
+                    string idField = individualRow.SamePersonalIDDifferentCustomer.Contains(":") ?
+                        individualRow.SamePersonalIDDifferentCustomer.Split(':')[1] : "PERSONAL ID";
+                    warningParts.Add(
+                        $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS");
+                }
+
+                // Reference name trust note (set by matcher or validation pass)
+                if (!string.IsNullOrWhiteSpace(individualRow.ReferenceNameTrustNote) &&
+                    !individualRow.ReferenceNameTrustNote.StartsWith("POSSIBLE DUPLICATE"))
+                    warningParts.Add(individualRow.ReferenceNameTrustNote);
+
+                ws.Cell(rowIndex, 180).Value = warningParts.Count > 0
+                    ? string.Join(" | ", warningParts)
+                    : string.Empty;
             }
         }
         else if (row is BusinessContextDud businessDudRow)
@@ -6086,37 +6210,51 @@
 
             // ── Sprint 3 cross-record error consumption ───────────────────────
             // #12 — Same PersonalID value linked to different CustomerIDs
+            // ── #12: NatID/PersonalID conflict consumer ──────────────────────────
             if (!string.IsNullOrWhiteSpace(ic.SamePersonalIDDifferentCustomer))
             {
-                string idField = ic.SamePersonalIDDifferentCustomer.Contains(":") ?
-                    ic.SamePersonalIDDifferentCustomer.Split(':')[1] : "PERSONAL ID";
-                bool isSamePerson = ic.SamePersonalIDDifferentCustomer.StartsWith("W");
+                var parts   = ic.SamePersonalIDDifferentCustomer.Split(':');
+                var prefix  = parts[0]; // W, E
+                var reason  = parts.Length > 1 ? parts[1] : string.Empty; // DOB, NAME, MISSPELL
+                var fields  = parts.Length > 2 ? parts[2] : (parts.Length > 1 && reason != "DOB" && reason != "NAME" && reason != "MISSPELL" ? reason : "PERSONAL ID");
 
-                if (isSamePerson)
+                if (prefix == "W")
                 {
-                    // Same person, different CustomerIDs — stays CLEAN.
-                    // Do NOT use AddCellError (it sets Passed=false → UNL).
-                    // Write warning message directly to the WARNING column via ReferenceNameTrustNote.
-                    var warningMsg = $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS";
+                    // Same person, different CustomerIDs — CLEAN with warning
+                    var warningMsg = $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {fields} IS SHARED ACROSS MULTIPLE CUSTOMER IDS";
                     ic.ReferenceNameTrustNote = string.IsNullOrWhiteSpace(ic.ReferenceNameTrustNote)
-                        ? warningMsg
-                        : ic.ReferenceNameTrustNote + " | " + warningMsg;
+                        ? warningMsg : ic.ReferenceNameTrustNote + " | " + warningMsg;
                 }
+                else if (reason == "DOB")
+                    AddCellError(ic.NatIDNum,
+                        $"NATIONAL ID LINKED TO DIFFERENT DATES OF BIRTH — SAME {fields} CANNOT BELONG TO TWO DIFFERENT PEOPLE");
+                else if (reason == "MISSPELL")
+                    AddCellError(ic.NatIDNum,
+                        $"NATIONAL ID CONFLICT: {fields} — NAMES PARTIALLY MATCH, POSSIBLE MISSPELLING — MANUAL REVIEW REQUIRED");
                 else
-                {
-                    // Genuinely different people sharing an ID → Error, unloadable
-                    AddCellError(ic.CustomerID,
-                        $"CROSS-RECORD CONFLICT: {idField} VALUE IS LINKED TO MORE THAN ONE CUSTOMER ID");
-                }
+                    AddCellError(ic.NatIDNum,
+                        $"NATIONAL ID LINKED TO DIFFERENT PERSONS: {fields} VALUE CANNOT BE SHARED ACROSS DIFFERENT INDIVIDUALS");
             }
+
+            // ── #14: Same CustomerID different DOB ────────────────────────────
+            if (!string.IsNullOrWhiteSpace(ic.SameCustomerIDDifferentDOB))
+                AddCellError(ic.DateOfBirth,
+                    "CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT DATES OF BIRTH");
+
+            // ── NatID format check ────────────────────────────────────────────
+            if (!string.IsNullOrWhiteSpace(ic.NatIDFormatInvalid))
+                AddCellError(ic.NatIDNum,
+                    "INVALID NATIONAL ID FORMAT — EXPECTED 3-LETTER COUNTRY CODE (GHA/NGA/CIV) FOLLOWED BY 10 ALPHANUMERIC CHARACTERS");
 
             // #14 — Same CustomerID linked to different names
             if (!string.IsNullOrWhiteSpace(ic.SameCustomerIDDifferentName))
             {
-                AddCellError(ic.CustomerID,
-                    "CROSS-RECORD CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT NAMES ACROSS RECORDS");
-                AddCellError(ic.Surname,
-                    "CROSS-RECORD CONFLICT: NAME DOES NOT MATCH OTHER RECORDS WITH THE SAME CUSTOMER ID");
+                bool misspell14 = ic.SameCustomerIDDifferentName.Contains("MISSPELL");
+                string msg = misspell14
+                    ? "CUSTOMER ID CONFLICT: NAME PARTIALLY MATCHES — POSSIBLE MISSPELLING — MANUAL REVIEW REQUIRED"
+                    : "CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT NAMES ACROSS RECORDS";
+                AddCellError(ic.CustomerID, msg);
+                AddCellError(ic.Surname, msg);
             }
 
             // #2 — Duplicate AccNum+CustomerID pair with different names (exact name mismatch)

@@ -14,6 +14,11 @@ public class IndividualContext
     public string SameCustomerIDDifferentName { get; set; } = string.Empty;
     /// <summary>Set to "E" when a non-overdraft duplicate name mismatch is detected.</summary>
     public string DuplicateNameMismatch { get; set; } = string.Empty;
+    // ── Sprint 11 cross-record flags ──────────────────────────────────────────
+    /// <summary>Set to "E" when same CustomerID maps to more than one distinct DOB.</summary>
+    public string SameCustomerIDDifferentDOB { get; set; } = string.Empty;
+    /// <summary>Set to "E" when a NatID/GhanaCard value has invalid format.</summary>
+    public string NatIDFormatInvalid         { get; set; } = string.Empty;
     // ── Sprint 10: Reference name trust ───────────────────────────────────────
     /// <summary>
     /// Canonical name from the reference DB for this record's AccNum+CustomerID+DisbursementDate.
