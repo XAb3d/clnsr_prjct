@@ -174,6 +174,16 @@ public class StringHelper
         // If all characters are digits, return false
         return false;
     }
+
+    public string JoinErrors(IEnumerable<string> errors)
+    {
+        return string.Join(" | ", errors.Where(e => !string.IsNullOrWhiteSpace(e)));
+    }
+
+    public string GetSamePersonalIDPartialMismatchError(string idField)
+    {
+        return $"CROSS-RECORD CONFLICT: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS WITH SAME DOB BUT SIMILAR NAME(S) — POSSIBLE MISSPELLING";
+    }
     //public bool ContainsAnyLetter(string input)
     //{
     //    foreach (char c in input)

@@ -1869,23 +1869,52 @@
                 // Tiebreaker: same DOB + same canonical name across all CustomerIDs → same person → Warning
                 var custGroups = entries.GroupBy(e => e.CustID).Select(g => g.First().Rec).ToList();
                 bool samePerson = false;
+                bool possibleMisspelling = false;
                 if (custGroups.Count > 1)
                 {
                     var first      = custGroups[0];
                     var firstDob = (first.DateOfBirth?.Data ?? string.Empty).Trim();
+                    samePerson = true;
 
-                    samePerson = custGroups.Skip(1).All(other =>
+                    foreach (var other in custGroups.Skip(1))
                     {
                         var otherDob = (other.DateOfBirth?.Data ?? string.Empty).Trim();
                         bool dobMatch = !string.IsNullOrWhiteSpace(firstDob) && firstDob == otherDob;
-                        bool nameMatch = IsSameNameFull(
+                        if (!dobMatch)
+                        {
+                            samePerson = false;
+                            possibleMisspelling = false;
+                            break;
+                        }
+
+                        var nameMatch = GetNameMatchLevel(
                             first.Surname?.Data ?? string.Empty, first.FirstName?.Data ?? string.Empty,
                             other.Surname?.Data ?? string.Empty, other.FirstName?.Data ?? string.Empty);
-                        return dobMatch && nameMatch;
-                    });
+
+                        if (nameMatch == NameMatchLevel.Full)
+                            continue;
+
+                        if (nameMatch == NameMatchLevel.Partial)
+                        {
+                            samePerson = false;
+                            possibleMisspelling = true;
+                            continue;
+                        }
+
+                        samePerson = false;
+                        possibleMisspelling = false;
+                        break;
+                    }
                 }
 
-                string flag = samePerson ? $"W:{fieldSummary}" : $"E:{fieldSummary}";
+                string flag;
+                if (samePerson)
+                    flag = $"W:{fieldSummary}";
+                else if (possibleMisspelling)
+                    flag = $"P:{fieldSummary}";
+                else
+                    flag = $"E:{fieldSummary}";
+
                 foreach (var entry in entries)
                     entry.Rec.SamePersonalIDDifferentCustomer = flag;
             }
@@ -1943,15 +1972,20 @@
         return new string(raw.Where(char.IsLetter).ToArray());
     }
 
+    string[] NormaliseNameTokens(string surname, string firstName)
+    {
+        var raw = $"{surname} {firstName}".ToUpperInvariant();
+        return raw.Split(new[] { ' ', '-', '\'', '.', ',' }, StringSplitOptions.RemoveEmptyEntries)
+                  .Select(t => new string(t.Where(char.IsLetter).ToArray()))
+                  .Where(t => t.Length > 0)
+                  .ToArray();
+    }
+
     // Returns sorted-token canonical for reordering detection.
     // "ASIEDU ASARE" and "ASARE ASIEDU" both → "ASAREASIEDU" after sort
     string NormaliseNameSortedTokens(string surname, string firstName)
     {
-        var raw = $"{surname} {firstName}".ToUpperInvariant();
-        var tokens = raw.Split(new[] { ' ', '-', '\'', '.', ',' },
-                               StringSplitOptions.RemoveEmptyEntries)
-                        .Select(t => new string(t.Where(char.IsLetter).ToArray()))
-                        .Where(t => t.Length > 0)
+        var tokens = NormaliseNameTokens(surname, firstName)
                         .OrderBy(t => t);
         return string.Concat(tokens);
     }
@@ -1986,6 +2020,32 @@
         return false;
     }
 
+    enum NameMatchLevel
+    {
+        None,
+        Partial,
+        Full
+    }
+
+    NameMatchLevel GetNameMatchLevel(string surname1, string firstName1, string surname2, string firstName2)
+    {
+        var tokens1 = NormaliseNameTokens(surname1, firstName1);
+        var tokens2 = NormaliseNameTokens(surname2, firstName2);
+        if (tokens1.Length == 0 || tokens2.Length == 0)
+            return NameMatchLevel.None;
+
+        if (IsSameNameFull(surname1, firstName1, surname2, firstName2))
+            return NameMatchLevel.Full;
+
+        var commonTokens = tokens1.Distinct(StringComparer.Ordinal)
+                                 .Intersect(tokens2.Distinct(StringComparer.Ordinal))
+                                 .Count();
+        if (commonTokens >= 2)
+            return NameMatchLevel.Partial;
+
+        return NameMatchLevel.None;
+    }
+
     // ── Issue #14 ─────────────────────────────────────────────────────────────
     // Same CustomerID linked to more than one distinct name cluster across records.
     // Uses canonical name comparison + DOB tiebreaker.
@@ -2010,21 +2070,28 @@
                 for (int j = i + 1; j < records.Count; j++)
                 {
                     var a = records[i]; var b = records[j];
-                    if (!IsSameNameFull(
-                            a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty,
-                            b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty))
+                    var tokensA = NormaliseNameTokens(
+                        a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty);
+                    var tokensB = NormaliseNameTokens(
+                        b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty);
+                    if (tokensA.Length == 0 || tokensB.Length == 0)
+                        continue;
+
+                    var nameMatch = GetNameMatchLevel(
+                        a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty,
+                        b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty);
+                    if (nameMatch == NameMatchLevel.Full)
+                        continue;
+
+                    var dobA = (a.DateOfBirth?.Data ?? string.Empty).Trim();
+                    var dobB = (b.DateOfBirth?.Data ?? string.Empty).Trim();
+                    bool dobMatch = !string.IsNullOrWhiteSpace(dobA) &&
+                                    !string.IsNullOrWhiteSpace(dobB) &&
+                                    dobA == dobB;
+                    if (!dobMatch || nameMatch == NameMatchLevel.Partial)
                     {
-                        // Names differ — check DOB as tiebreaker
-                        var dobA = (a.DateOfBirth?.Data ?? string.Empty).Trim();
-                        var dobB = (b.DateOfBirth?.Data ?? string.Empty).Trim();
-                        bool dobMatch = !string.IsNullOrWhiteSpace(dobA) &&
-                                        !string.IsNullOrWhiteSpace(dobB) &&
-                                        dobA == dobB;
-                        if (!dobMatch)
-                        {
-                            hasConflict = true;
-                            break;
-                        }
+                        hasConflict = true;
+                        break;
                     }
                 }
                 if (hasConflict) break;
@@ -2064,26 +2131,28 @@
                 for (int j = i + 1; j < records.Count; j++)
                 {
                     var a = records[i]; var b = records[j];
-                    var canonA = NormaliseNameForComparison(
+                    var tokensA = NormaliseNameTokens(
                         a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty);
-                    var canonB = NormaliseNameForComparison(
+                    var tokensB = NormaliseNameTokens(
                         b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty);
-
-                    if (string.IsNullOrWhiteSpace(canonA) || string.IsNullOrWhiteSpace(canonB))
+                    if (tokensA.Length == 0 || tokensB.Length == 0)
                         continue;
 
-                    if (!IsSameName(canonA, canonB))
+                    var nameMatch = GetNameMatchLevel(
+                        a.Surname?.Data ?? string.Empty, a.FirstName?.Data ?? string.Empty,
+                        b.Surname?.Data ?? string.Empty, b.FirstName?.Data ?? string.Empty);
+                    if (nameMatch == NameMatchLevel.Full)
+                        continue;
+
+                    var dobA = (a.DateOfBirth?.Data ?? string.Empty).Trim();
+                    var dobB = (b.DateOfBirth?.Data ?? string.Empty).Trim();
+                    bool dobMatch = !string.IsNullOrWhiteSpace(dobA) &&
+                                    !string.IsNullOrWhiteSpace(dobB) &&
+                                    dobA == dobB;
+                    if (!dobMatch || nameMatch == NameMatchLevel.Partial)
                     {
-                        var dobA = (a.DateOfBirth?.Data ?? string.Empty).Trim();
-                        var dobB = (b.DateOfBirth?.Data ?? string.Empty).Trim();
-                        bool dobMatch = !string.IsNullOrWhiteSpace(dobA) &&
-                                        !string.IsNullOrWhiteSpace(dobB) &&
-                                        dobA == dobB;
-                        if (!dobMatch)
-                        {
-                            hasConflict = true;
-                            break;
-                        }
+                        hasConflict = true;
+                        break;
                     }
                 }
                 if (hasConflict) break;
@@ -4379,7 +4448,7 @@
                         businessRow.SchdInstalAmount,businessRow.RepaymentFreq,businessRow.CurBal,businessRow.CurBalIndicator,businessRow.AmountInArrears,
                         businessRow.NDIA,businessRow.FacilityStatusCode,businessRow.FacilityStatusDate
                     };
-                string allErrors = string.Join(", ", cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
+                string allErrors = stringHelper.JoinErrors(cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
                 ws.Cell(rowIndex, 159).Value = allErrors;
             }
         }
@@ -4757,7 +4826,7 @@
                         individualRow.SchdInstalAmount,individualRow.RepaymentFreq,individualRow.CurBal,individualRow.CurBalIndicator,individualRow.AmountInArrears,
                         individualRow.NDIA,individualRow.FacilityStatusCode,individualRow.FacilityStatusDate
                     };
-                string allErrors = string.Join(", ", cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
+                string allErrors = stringHelper.JoinErrors(cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
                 ws.Cell(rowIndex, 179).Value = allErrors;
 
                 // ── Sprint 9/10: WARNING column (col 180) ────────────────────
@@ -4891,7 +4960,7 @@
                         businessDudRow.Curlocadd1,businessDudRow.Postaddrline1, businessDudRow.ChequeNumber, businessDudRow.ChequeAmount, businessDudRow.DateIssued, 
                         businessDudRow.DateBounced
                     };
-                string allErrors = string.Join(", ", cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
+                string allErrors = stringHelper.JoinErrors(cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
                 ws.Cell(rowIndex, 47).Value = allErrors;
             }
         }
@@ -5059,7 +5128,7 @@
                         individualDudRow.CreditFacilityAccNum,individualDudRow.CustomerID,individualDudRow.BranchCode,individualDudRow.NatIDNum,individualDudRow.Gender,individualDudRow.ChequeAmount,
                         individualDudRow.DateOfBrith,individualDudRow.Surname,individualDudRow.CurResAddr1,individualDudRow.PostAddrLine1, individualDudRow.ChequeNumber, individualDudRow.DateIssued, individualDudRow.DateBounced
                     };
-                string allErrors = string.Join(", ", cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
+                string allErrors = stringHelper.JoinErrors(cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
                 ws.Cell(rowIndex, 75).Value = allErrors;
             }
         }
@@ -6113,6 +6182,11 @@
                     AddCellError(ic.CustomerID,
                         $"WARNING — POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS");
                     // Do NOT set ic.CustomerID.Passed = false — record remains loadable
+                }
+                else if (ic.SamePersonalIDDifferentCustomer.StartsWith("P"))
+                {
+                    AddCellError(ic.CustomerID,
+                        stringHelper.GetSamePersonalIDPartialMismatchError(idField));
                 }
                 else
                 {
