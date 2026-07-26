@@ -2611,12 +2611,20 @@
             processedExcelRecords = fromExcelFile.ToList();
         }
 
-        // Create a dictionary from database records for quick lookup by (CreditFacilityAccNum, CustomerID)
-        var databaseDict = new Dictionary<(string, string), IndividualRef>();
+        // Create a dictionary from database records for quick lookup by (CreditFacilityAccNum, CustomerID).
+        // A facility can legitimately have MULTIPLE historical rows (one per DisbursementDate ever seen —
+        // this is the whole point for overdrafts). Keep the full list per key instead of collapsing to
+        // the last-seen row, or history for earlier draws silently disappears.
+        var databaseDict = new Dictionary<(string, string), List<IndividualRef>>();
         foreach (var dbRecord in fromDatabase)
         {
             var key = (NormalizeAccountNumber(dbRecord.CreditFacilityAccNum), NormalizeCustomerId(dbRecord.CustomerID));
-            databaseDict[key] = dbRecord;
+            if (!databaseDict.TryGetValue(key, out var list))
+            {
+                list = new List<IndividualRef>();
+                databaseDict[key] = list;
+            }
+            list.Add(dbRecord);
         }
 
         // Initialize counters for various types of matches/issues
@@ -2635,11 +2643,23 @@
 
             var key = (creditFacilityAccNum, customerID);
 
-            if (databaseDict.TryGetValue(key, out var dbRecord))
+            if (databaseDict.TryGetValue(key, out var dbRecords) && dbRecords.Count > 0)
             {
-                // Found matching record in the database
+                // Found matching facility in the database (possibly multiple historical rows —
+                // one per DisbursementDate ever accepted for this facility)
                 var excelDob = excelRecord.DateOfBirth?.Data;
                 __matchdata++;
+
+                // Overdraft facilities legitimately redraw on new dates — exempt from the
+                // disbursement-date-mismatch rule, same exemption already applied to the
+                // intra-file duplicate check above.
+                bool isOverdraft = (excelRecord.CreditFacilityType?.Data ?? string.Empty)
+                    .Trim().ToUpperInvariant() == "V";
+
+                // Prefer the historical row matching this exact date (for DOB comparison / name);
+                // fall back to any row on file for the facility if this date is genuinely new.
+                var dbRecord = dbRecords.FirstOrDefault(r => r.DisbursementDate == disbursementDate)
+                                ?? dbRecords[0];
 
                 // ── Sprint 10: Store reference canonical name for validation pass ──
                 // If the reference has name data, record it so the validation pass
@@ -2652,8 +2672,10 @@
                             dbRecord.FirstName ?? string.Empty);
                 }
 
-                // Check if DisbursementDate matches
-                if (dbRecord.DisbursementDate != disbursementDate)
+                // Check if this DisbursementDate has been seen before for this facility
+                bool dateOnFile = dbRecords.Any(r => r.DisbursementDate == disbursementDate);
+
+                if (!dateOnFile && !isOverdraft)
                 {
                     excelRecord.DisburStatus = " THE DISBURSEMENT DATE DOES NOT MATCH THE PREVIOUS SUBMISSION ";
                     __burscount++;
@@ -2719,10 +2741,17 @@
                 // Check if Disbursment date differ
                 if (disValues.Distinct().Count() > 1)
                 {
-                    // Mark all records in this group with duplicate DOB issue
+                    // Overdraft facilities legitimately redraw multiple times in the same
+                    // submission month, each with a different date — that's expected, not
+                    // a duplicate. Same exemption as the cross-submission check.
                     foreach (var individual in group)
                     {
-                        individual.DisbursementDateMisMatch = "UNL";
+                        bool isOverdraft = (individual.CreditFacilityType?.Data ?? string.Empty)
+                            .Trim().ToUpperInvariant() == "V";
+                        if (!isOverdraft)
+                        {
+                            individual.DisbursementDateMisMatch = "UNL";
+                        }
                     }
                 }
 
