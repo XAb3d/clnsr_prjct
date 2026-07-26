@@ -105,7 +105,7 @@
                     <MudPaper Class="d-flex flex-row py-3 px-2" Elevation="24" Style="@($"color:{Colors.LightGreen.Accent3}; background:{Colors.BlueGray.Darken4};")">
                         <MudButtonGroup Color="Color.Primary" Variant="Variant.Text" DropShadow="true">
                             <MudButton OnClick="() => ToggleCleaningViewOrRefView(1)">CLEANING A FILE</MudButton>
-                            <MudButton OnClick="() => ToggleCleaningViewOrRefView(2)">REFERENCE A FILE</MudButton>
+                            <MudButton OnClick="() => ToggleCleaningViewOrRefView(2)">REFERENCE / REGISTER RECORDS</MudButton>
                         </MudButtonGroup>
                     </MudPaper>
                     <MudDivider Class="mb-3"></MudDivider>
@@ -138,9 +138,19 @@
 
                     <div class="@referenceView">
                         <MudDivider Class="mb-3"></MudDivider>
+                        <MudAlert Severity="Severity.Info" Class="mb-3" Dense="true">
+                            Use this tab to register records into the reference database without running them
+                            through CLEAN/UNL routing. This covers two cases: (1) loading a subscriber's initial
+                            reference data, and (2) <strong>registering manually rescued records</strong> — after
+                            an associate manually cleans and adds records to the CLEAN sheet, upload that corrected
+                            CLEAN sheet here and click "Register / Insert reference(s)" so those records are trusted
+                            next month too. <strong>Keep the file's original name prefix intact</strong> (the part
+                            before the first "_") — that's how the subscriber is identified; renaming it will cause
+                            records to register against the wrong subscriber or fail silently.
+                        </MudAlert>
                         <MudPaper Class="d-flex flex-row" Elevation="0">
                             <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="REF_ClearSeletedFiles">Reload Cleanser</MudButton>
-                            <MudButton Variant="Variant.Text" Color="Color.Warning" OnClick="REF_InsertThisAsLatesReference">Insert reference(s)</MudButton>
+                            <MudButton Variant="Variant.Text" Color="Color.Warning" OnClick="REF_InsertThisAsLatesReference">Register / Insert reference(s)</MudButton>
                             <MudSpacer></MudSpacer>
                             <MudButton Variant="Variant.Text" Color="Color.Inherit">DUPLICATE RECORD: @duplicateCount</MudButton>
                             <MudButton Variant="Variant.Text" Color="Color.Inherit">NEW RECORD: @newdata</MudButton>
