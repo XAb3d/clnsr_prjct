@@ -17,6 +17,14 @@ public class IndividualContext
     // ── Sprint 11 cross-record flags ──────────────────────────────────────────
     /// <summary>Set to "E" when same CustomerID maps to more than one distinct DOB.</summary>
     public string SameCustomerIDDifferentDOB { get; set; } = string.Empty;
+    /// <summary>
+    /// Set to "E:field1,field2" when the same CustomerID is linked to more than one
+    /// distinct GHA-format (Ghana Card) national ID value, regardless of which of the
+    /// 7 ID columns (NatIDNum/VotersIDNum/DriverLicNum/PassportNum/SSNum/EzwichNum/
+    /// OtherIDNum) each value is filed under. The field list names which of THIS
+    /// record's own ID columns held a GHA value, for precise cell-level flagging.
+    /// </summary>
+    public string SameCustomerIDDifferentGhanaCard { get; set; } = string.Empty;
     /// <summary>Set to "E" when a NatID/GhanaCard value has invalid format.</summary>
     public string NatIDFormatInvalid         { get; set; } = string.Empty;
     // ── Sprint 10: Reference name trust ───────────────────────────────────────
