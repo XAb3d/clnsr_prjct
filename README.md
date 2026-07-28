@@ -13,6 +13,19 @@ A C# / ASP.NET Blazor (.NET 9) application that validates, normalises, and prepa
 - Detects and routes duplicate records
 - Matches submitted records against a reference database to identify new and updated records
 - Outputs a multi-sheet Excel workbook: **CLEAN**, **UNLOADABLE**, and **DUPLICATE** sheets
+- Generates an on-demand **Unloadable Log** (header row + Demographic/Financial rejection breakdown) after cleaning an IND file
+- Flags cross-record identity conflicts, including same `CustomerID` linked to different GHA (Ghana Card) numbers across any of the 7 ID columns
+
+---
+
+## Recent Changes
+
+See [`CHANGELOG.md`](./CHANGELOG.md) for the full detail. Most recent:
+
+- **2026-07-28** — GHA card cross-record conflict check; on-demand Unloadable Log
+  (new `SubscriberProfile` table, requires a migration — see below); clarified
+  the manual-rescue registration workflow; fixed overdraft disbursement-date
+  false-UNL routing.
 
 ---
 
@@ -34,6 +47,8 @@ clnsr_prjct/
 │   │   └── ExcelProcessorService.cs        # Excel read/write helpers
 │   ├── Data/
 │   │   └── DataManagementService.cs        # SQL Server — reference DB access
+│   ├── Services/
+│   │   └── UnloadableLogService.cs         # Unloadable log aggregation + xlsx generation
 │   ├── Entities/
 │   │   ├── CellDataAndStatus.cs            # Core result object per field
 │   │   ├── IndividualContext.cs            # Row-level context — IND
@@ -90,16 +105,7 @@ Example:
 
 All known issues, severity ratings, priority levels, and resolution status are maintained in the formal issues tracker document (`Cleanser_Issues_Tracker_v2.xlsx`). See the accompanying Word report (`Cleanser_Issues_Report.docx`) for the full executive summary and issue descriptions.
 
-### Current Sprint Plan
-
-| Sprint | Issues | Focus |
-|---|---|---|
-| 1 | #3, #7, #9, #10, #11, #13, #15 | Close resolved issues + zero-risk fixes |
-| 2 | #4, #5, #8, #9-BUS | Silent data deletion bugs |
-| 3 | #12, #14, #16, #2 | Cross-record identity checks |
-| 4 | #18 | Warning / Exception column |
-| 5 | #1 | Reference file persistence |
-| 6 | #19 | QA module integration |
+> **Note:** the sprint plan previously listed here (Sprints 1–6, issues #1–#19) is stale as of 2026-07-28 — several of those issues have since shipped (see `CHANGELOG.md`), and the tracker document is the source of truth for current status. This README won't try to keep a duplicate sprint table in sync going forward; check the tracker directly.
 
 ---
 
@@ -132,6 +138,12 @@ Requires SQL Server and .NET 9 SDK. If `dotnet ef` is not installed:
 ```bash
 dotnet tool install --global dotnet-ef
 ```
+
+> **If you're pulling an existing checkout that predates 2026-07-28:** the
+> Unloadable Log feature added a new `SubscriberProfile` table. Run
+> `dotnet ef migrations add AddSubscriberProfile --project CleanserBlazorUI`
+> then `dotnet ef database update --project CleanserBlazorUI` before running.
+> A fresh clone with all migrations already applied doesn't need this step.
 
 ---
 
