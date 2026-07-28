@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @using CleanserBlazorUI.DevelopmentFolder
 @using ICleanserBlazorUI.Interface
+@using CleanserBlazorUI.Services
 @using Microsoft.AspNetCore.Authorization
 @using System.Security.Claims
 @* @implements IDisposable *@
@@ -136,6 +137,35 @@
                         </MudPaper>
                     </div>
 
+                    <div class="@unlLogPanelView">
+                        <MudDivider Class="mb-3"></MudDivider>
+                        <MudAlert Severity="MudBlazor.Severity.Info" Class="mb-3" Dense="true">
+                            Generates the unloadable log's header row plus the Demographic/Financial rejection
+                            breakdown tables for the file just cleaned (@(_lastUnlBatchInd?.Count ?? 0) UNL records).
+                            Subscriber Name / Institution Type are filled in once per subscriber and remembered
+                            after that. Date Emailed / Date Fixed are left blank for now to fill in manually.
+                        </MudAlert>
+                        <MudGrid>
+                            <MudItem xs="12" sm="4">
+                                <MudTextField @bind-Value="UnlLogAssociate" Label="Associate" Variant="Variant.Outlined" Margin="Margin.Dense"></MudTextField>
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudTextField @bind-Value="UnlLogSubscriberName" Label="Subscriber Name" Variant="Variant.Outlined" Margin="Margin.Dense"></MudTextField>
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudTextField @bind-Value="UnlLogInstitutionType" Label="Institution Type" Variant="Variant.Outlined" Margin="Margin.Dense"></MudTextField>
+                            </MudItem>
+                            <MudItem xs="12">
+                                <MudTextField @bind-Value="UnlLogComments" Label="Comments" Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2"></MudTextField>
+                            </MudItem>
+                        </MudGrid>
+                        <MudPaper Class="d-flex flex-row align-center py-2" Elevation="0">
+                            <MudCheckBox Class="my-1 mx-1" Color="Color.Primary" @bind-Value="UnlLogSaveSubscriberInfo" Label="Remember Subscriber Name / Institution Type for next time"></MudCheckBox>
+                            <MudSpacer></MudSpacer>
+                            <MudButton Class="my-1 mx-1" Variant="Variant.Filled" Color="Color.Warning" OnClick="GenerateUnloadableLogClicked">Generate Unloadable Log</MudButton>
+                        </MudPaper>
+                    </div>
+
                     <div class="@referenceView">
                         <MudDivider Class="mb-3"></MudDivider>
                         <MudAlert Severity="MudBlazor.Severity.Info" Class="mb-3" Dense="true">
@@ -227,6 +257,23 @@
     string cleaningView = "d-block";
     string referenceView = "d-block";
     bool CleanOnlyOrCleanAndReference { get; set; }
+
+    // ── Unloadable Log (on-demand, section 1 header row + rejection breakdown) ──
+    List<IndividualContext>? _lastUnlBatchInd = null;
+    string _lastUnlFilename = string.Empty;
+    string _lastUnlSubcode = string.Empty;
+    string _lastUnlDataType = string.Empty;
+    string _lastUnlReportingPeriod = string.Empty;
+    string _lastUnlReportingYear = string.Empty;
+    string _lastUnlMonths = string.Empty;
+    string _lastUnlLogYear = string.Empty;
+    string unlLogPanelView = "d-none";
+    string UnlLogAssociate = string.Empty;
+    string UnlLogSubscriberName = string.Empty;
+    string UnlLogInstitutionType = string.Empty;
+    string UnlLogComments = string.Empty;
+    bool UnlLogSaveSubscriberInfo = true;
+    int _unlLogSerialCounter = 0;
     MudBlazor.Severity AlertSeverity { get; set; } = MudBlazor.Severity.Success;
     string AlertSeverityMessage;
     System.Timers.Timer _timer;
@@ -309,6 +356,56 @@
         numberOfPassedCount = $"Passed Files ({passedRecord.Count})";
         numberOffailedCount = failedRecord.Count.ToString();
         progressIsVisible = "d-none";
+    }
+
+    // ── Unloadable Log: on-demand, for the file most recently cleaned ──
+    async Task GenerateUnloadableLogClicked()
+    {
+        if (_lastUnlBatchInd == null || _lastUnlBatchInd.Count == 0)
+        {
+            AlertSeverityMessage = "No unloadable records to report for the last run.";
+            AlertSeverity = MudBlazor.Severity.Warning;
+            AlertSeverityVisible = "d-block";
+            StateHasChanged();
+            return;
+        }
+
+        if (UnlLogSaveSubscriberInfo && !string.IsNullOrWhiteSpace(_lastUnlSubcode))
+        {
+            await DataManagementService.SaveSubscriberProfileAsync(_lastUnlSubcode, UnlLogSubscriberName, UnlLogInstitutionType);
+        }
+
+        _unlLogSerialCounter++;
+        var reasonSummary = UnloadableLogService.BuildUnloadableReasonSummary(_lastUnlBatchInd);
+
+        var header = new UnloadableLogService.UnloadableLogHeader
+        {
+            SerialNo = _unlLogSerialCounter,
+            SubscriberName = UnlLogSubscriberName,
+            Subcode = _lastUnlSubcode,
+            InstitutionType = UnlLogInstitutionType,
+            Associate = UnlLogAssociate,
+            Filename = _lastUnlFilename,
+            NumberOfRecords = _lastUnlBatchInd.Count,
+            ReportingPeriod = _lastUnlReportingPeriod,
+            ReportingYear = _lastUnlReportingYear,
+            UnloadableReason = reasonSummary,
+            DateEmailed = string.Empty,
+            DateFixed = string.Empty,
+            Comments = UnlLogComments,
+            DataType = _lastUnlDataType,
+            Months = _lastUnlMonths,
+            LogYear = _lastUnlLogYear
+        };
+
+        byte[] logBytes = UnloadableLogService.GenerateWorkbook(_lastUnlBatchInd, header);
+        string downloadName = $"UnloadableLog_{_lastUnlSubcode}_{_lastUnlReportingYear}{_lastUnlMonths}.xlsx";
+        await JS.InvokeVoidAsync("downloadFile", downloadName, logBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+
+        AlertSeverityMessage = $"Unloadable log generated ({_lastUnlBatchInd.Count} records).";
+        AlertSeverity = MudBlazor.Severity.Success;
+        AlertSeverityVisible = "d-block";
+        StateHasChanged();
     }
     async Task<CleaningStatus> REF_GetSpreadsheetData(IBrowserFile browserFile, int id)
     {
@@ -2916,6 +3013,26 @@
                         matchdata = _matchdata;
                         newdata = _newdata;
                         duplicateCount = _duplicateCount;
+
+                        // ── Unloadable Log: capture this run's UNL batch + context ──
+                        // so the on-demand "Generate Unloadable Log" button has
+                        // something to work from after the run finishes.
+                        _lastUnlBatchInd = _duplicatesInd;
+                        _lastUnlFilename = filename;
+                        _lastUnlDataType = "IND";
+                        _lastUnlSubcode = await DataManagementService.GetFileShortCodeFromFileName(filename);
+                        var unlFDate = stringHelper.GetFacilityDateFromFileName(filename, true);
+                        if (unlFDate.IsValid && DateTime.TryParseExact(unlFDate.LastDate, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var unlParsedDate))
+                        {
+                            _lastUnlReportingPeriod = unlParsedDate.ToString("MMMM yyyy");
+                            _lastUnlReportingYear = unlParsedDate.Year.ToString();
+                            _lastUnlMonths = unlParsedDate.ToString("MMMM");
+                            _lastUnlLogYear = unlParsedDate.Year.ToString();
+                        }
+                        var unlExistingProfile = await DataManagementService.GetSubscriberProfileAsync(_lastUnlSubcode);
+                        UnlLogSubscriberName = unlExistingProfile?.SubscriberName ?? string.Empty;
+                        UnlLogInstitutionType = unlExistingProfile?.InstitutionType ?? string.Empty;
+                        unlLogPanelView = (_duplicatesInd != null && _duplicatesInd.Count > 0) ? "d-block" : "d-none";
 
 
                         if (CleanOnlyOrCleanAndReference == false)

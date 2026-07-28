@@ -673,4 +673,40 @@ public class DataManagementService
         }
         return settingAsAnArray;
     }
+
+    // ── Unloadable Log: subscriber profile lookup (Name + Institution Type) ──
+    // Filled in once per subscriber via the log-generation dialog, reused
+    // automatically on every subsequent log for that same subscriber code.
+    public async Task<SubscriberProfile?> GetSubscriberProfileAsync(string subscriberCode)
+    {
+        if (string.IsNullOrWhiteSpace(subscriberCode)) return null;
+        return await _context.SubscriberProfiles
+            .FirstOrDefaultAsync(p => p.SubscriberCode == subscriberCode);
+    }
+
+    public async Task SaveSubscriberProfileAsync(string subscriberCode, string subscriberName, string institutionType)
+    {
+        if (string.IsNullOrWhiteSpace(subscriberCode)) return;
+
+        var existing = await _context.SubscriberProfiles
+            .FirstOrDefaultAsync(p => p.SubscriberCode == subscriberCode);
+
+        if (existing != null)
+        {
+            existing.SubscriberName = subscriberName;
+            existing.InstitutionType = institutionType;
+            existing.LastUpdatedDate = DateTime.Now;
+        }
+        else
+        {
+            _context.SubscriberProfiles.Add(new SubscriberProfile
+            {
+                SubscriberCode = subscriberCode,
+                SubscriberName = subscriberName,
+                InstitutionType = institutionType,
+                LastUpdatedDate = DateTime.Now
+            });
+        }
+        await _context.SaveChangesAsync();
+    }
 }
