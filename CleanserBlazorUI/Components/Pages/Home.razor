@@ -2401,6 +2401,60 @@
             }
         }
 
+        // ── #15: Same CustomerID — different GHA (Ghana Card) numbers ──────────
+        // GHA Card numbers are meant to uniquely identify one person nationally,
+        // so if the same CustomerID has two different GHA-format ID values on
+        // file -- regardless of which of the 7 ID columns each is filed under --
+        // that's a genuine identity conflict, not just a formatting quirk.
+        // Restricted to GHA specifically (not other 3-letter country prefixes
+        // like NGA/CIV) since only the Ghana Card carries that uniqueness
+        // guarantee here.
+        static bool IsGhanaCardNumber(string? value, out string normalised)
+        {
+            normalised = string.Empty;
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            var cleaned = System.Text.RegularExpressions.Regex.Replace(value, @"[ \/,_-]", "").ToUpperInvariant();
+            if (cleaned.Length != 13) return false;
+            if (!cleaned.Substring(0, 3).Equals("GHA", StringComparison.Ordinal)) return false;
+            if (!cleaned.Substring(3).All(char.IsDigit)) return false;
+            normalised = cleaned;
+            return true;
+        }
+
+        foreach (var grp in byCustomerID.Values)
+        {
+            var records = grp.ToList();
+            if (records.Count < 2) continue;
+
+            // (fieldName, ghaValue, record) for every GHA-format ID across all 7 ID columns
+            var ghaEntries = new List<(string Field, string Value, IndividualContext Rec)>();
+            foreach (var r in records)
+            {
+                void CheckGhaField(string? val, string fieldName)
+                {
+                    if (IsGhanaCardNumber(val, out var norm))
+                        ghaEntries.Add((fieldName, norm, r));
+                }
+                CheckGhaField(r.NatIDNum?.Data, "NatIDNum");
+                CheckGhaField(r.VotersIDNum?.Data, "VotersIDNum");
+                CheckGhaField(r.DriverLicNum?.Data, "DriverLicNum");
+                CheckGhaField(r.PassportNum?.Data, "PassportNum");
+                CheckGhaField(r.SSNum?.Data, "SSNum");
+                CheckGhaField(r.EzwichNum?.Data, "EzwichNum");
+                CheckGhaField(r.OtherIDNum?.Data, "OtherIDNum");
+            }
+
+            var distinctGhaValues = ghaEntries.Select(e => e.Value).Distinct().ToList();
+            if (distinctGhaValues.Count > 1)
+            {
+                foreach (var r in records)
+                {
+                    var ownFields = ghaEntries.Where(e => e.Rec == r).Select(e => e.Field).Distinct();
+                    r.SameCustomerIDDifferentGhanaCard = "E:" + string.Join(",", ownFields);
+                }
+            }
+        }
+
         // ── #2: Same AccNum+CustomerID → different name clusters ──────────────
         foreach (var grp in byAccNumCustID.Values)
         {
@@ -6338,6 +6392,28 @@
             if (!string.IsNullOrWhiteSpace(ic.NatIDFormatInvalid))
                 AddCellError(ic.NatIDNum,
                     "INVALID NATIONAL ID FORMAT — EXPECTED 3-LETTER COUNTRY CODE (GHA/NGA/CIV) FOLLOWED BY 10 ALPHANUMERIC CHARACTERS");
+
+            // ── #15: Same CustomerID — different GHA (Ghana Card) numbers ─────
+            if (!string.IsNullOrWhiteSpace(ic.SameCustomerIDDifferentGhanaCard))
+            {
+                const string ghaMsg = "CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT GHANA CARD (GHA) NUMBERS ACROSS RECORDS";
+                AddCellError(ic.CustomerID, ghaMsg);
+                var ghaParts = ic.SameCustomerIDDifferentGhanaCard.Split(':');
+                var ghaFields = ghaParts.Length > 1 ? ghaParts[1] : string.Empty;
+                foreach (var f in ghaFields.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    switch (f)
+                    {
+                        case "NatIDNum": AddCellError(ic.NatIDNum, ghaMsg); break;
+                        case "VotersIDNum": AddCellError(ic.VotersIDNum, ghaMsg); break;
+                        case "DriverLicNum": AddCellError(ic.DriverLicNum, ghaMsg); break;
+                        case "PassportNum": AddCellError(ic.PassportNum, ghaMsg); break;
+                        case "SSNum": AddCellError(ic.SSNum, ghaMsg); break;
+                        case "EzwichNum": AddCellError(ic.EzwichNum, ghaMsg); break;
+                        case "OtherIDNum": AddCellError(ic.OtherIDNum, ghaMsg); break;
+                    }
+                }
+            }
 
             // #14 — Same CustomerID linked to different names
             if (!string.IsNullOrWhiteSpace(ic.SameCustomerIDDifferentName))
