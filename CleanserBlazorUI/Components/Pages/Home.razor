@@ -613,7 +613,13 @@
                     else
                     {
                         await DataManagementService.SaveExcelDataToDatabaseInd(ExcelDataRecieved, REF_filename);
-                        File.Delete(FullExcelDataFilePath!);
+                        // The temp file's stream (destinationStream) is still open at this point --
+                        // deleting it before disposal throws "being used by another process" on
+                        // Windows. Dispose explicitly first. Cleanup failure is non-fatal (a
+                        // background TempFileCleaner already sweeps this directory), so it
+                        // shouldn't turn an otherwise-successful registration into a reported failure.
+                        destinationStream.Dispose();
+                        try { File.Delete(FullExcelDataFilePath!); } catch { /* non-fatal, swept later */ }
                         AlertSeverityMessage = $"Success: {ExcelDataRecieved.Count} record(s) registered to the reference database.";
                         AlertSeverity = MudBlazor.Severity.Success;
                         AlertSeverityVisible = "d-block";
@@ -681,7 +687,8 @@
                     else
                     {
                         await DataManagementService.SaveExcelDataToDatabaseBus(ExcelDataRecieved, REF_filename);
-                        File.Delete(FullExcelDataFilePath!);
+                        destinationStream.Dispose();
+                        try { File.Delete(FullExcelDataFilePath!); } catch { /* non-fatal, swept later */ }
                         AlertSeverityMessage = $"Success: {ExcelDataRecieved.Count} record(s) registered to the reference database.";
                         AlertSeverity = MudBlazor.Severity.Success;
                         AlertSeverityVisible = "d-block";
