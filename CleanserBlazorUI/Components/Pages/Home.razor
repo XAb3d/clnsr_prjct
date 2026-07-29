@@ -3119,8 +3119,17 @@
                 }
 
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // Was previously catch (Exception) {} -- any failure here (e.g. an EF
+                // Core tracking conflict from the scoped DbContext persisting across
+                // multiple sequential uploads within the same Blazor Server circuit)
+                // was silently swallowed, producing no output file with zero visible
+                // error. Surface it instead.
+                AlertSeverityMessage = $"Cleaning failed: {ex.Message}";
+                AlertSeverity = MudBlazor.Severity.Error;
+                AlertSeverityVisible = "d-block";
+                StateHasChanged();
             }
             return CleaningStatus.CompletedWithUnknownErrors;
         }
@@ -3203,8 +3212,12 @@
                 }
 
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                AlertSeverityMessage = $"Cleaning failed: {ex.Message}";
+                AlertSeverity = MudBlazor.Severity.Error;
+                AlertSeverityVisible = "d-block";
+                StateHasChanged();
             }
             return CleaningStatus.CompletedWithUnknownErrors;
         }
