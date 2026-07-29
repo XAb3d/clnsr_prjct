@@ -2618,6 +2618,11 @@
     }
     string NormalizeCustomerId(string? value)
     {
+        // Used ONLY for matching/key-building (matcher dictionaries, cross-record
+        // checks) so that "001238" and "1238" are treated as the same real-world
+        // customer when comparing against history. NEVER assign the result of
+        // this back onto a CellDataAndStatus.Data that will be written to output
+        // or saved to the reference DB -- use CleanCustomerIdForOutput for that.
         var normalized = RemoveAllWhitespace(value).ToUpperInvariant();
         if (normalized.All(char.IsDigit))
         {
@@ -2628,6 +2633,17 @@
             return "0";
         }
         return normalized;
+    }
+    string CleanCustomerIdForOutput(string? value)
+    {
+        // What actually gets written to CLEAN output and saved to the reference
+        // DB. Strips stray whitespace and normalizes case, same as
+        // NormalizeCustomerId, but deliberately does NOT strip leading zeros --
+        // "001238" is a real, meaningful value (e.g. it's what the subscriber
+        // institution's own system uses), and stripping it here previously
+        // caused a correctly-submitted customer to look like a brand new one
+        // downstream.
+        return RemoveAllWhitespace(value).ToUpperInvariant();
     }
     string NormalizeAccountNumber(string? value)
     {
@@ -2705,7 +2721,7 @@
             }
             else
             {
-                customer.Data = NormalizeCustomerId(customer.Data);
+                customer.Data = CleanCustomerIdForOutput(customer.Data);
             }
         }
 
