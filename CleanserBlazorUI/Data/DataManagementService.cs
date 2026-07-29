@@ -96,6 +96,15 @@ public class DataManagementService
                 }
                 if (!string.IsNullOrWhiteSpace(item.DateOfBirth))
                     dbRow.DateOfBirth = item.DateOfBirth;
+
+                // Status is a mutable real-world state (open/closed), not enriched-once
+                // like names/IDs -- always refresh to whatever was just submitted.
+                if (!string.IsNullOrWhiteSpace(item.FacilityStatusCode) && dbRow.FacilityStatusCode != item.FacilityStatusCode)
+                {
+                    dbRow.FacilityStatusCode = item.FacilityStatusCode;
+                    dbRow.LastUpdatedDate = now;
+                    if (!toUpdate.Contains(dbRow)) toUpdate.Add(dbRow);
+                }
             }
             else
             {
@@ -116,6 +125,7 @@ public class DataManagementService
                     Surname              = item.Surname                    ?? string.Empty,
                     FirstName            = item.FirstName                  ?? string.Empty,
                     MiddleNames          = item.MiddleNames                ?? string.Empty,
+                    FacilityStatusCode   = item.FacilityStatusCode         ?? string.Empty,
                     CurrenVersion        = 1,
                     CreatedDate          = now,
                     LastUpdatedDate      = now
@@ -153,6 +163,7 @@ public class DataManagementService
             Surname              = r.Surname?.Data              ?? string.Empty,
             FirstName            = r.FirstName?.Data            ?? string.Empty,
             MiddleNames          = r.MiddleNames?.Data          ?? string.Empty,
+            FacilityStatusCode   = r.FacilityStatusCode?.Data   ?? string.Empty,
         });
         return await SaveExcelDataToDatabaseInd(mapped, fileShortName);
     }
@@ -174,6 +185,7 @@ public class DataManagementService
 
         var toInsert = new List<BusinessRef>();
         var toUpdate = new List<BusinessRef>();
+        var busChangelog = new List<(string, string, string, string)>();
 
         foreach (var item in dataFromExcel)
         {
@@ -185,8 +197,27 @@ public class DataManagementService
             {
                 if (!string.IsNullOrWhiteSpace(item.DateOfBirth))
                     dbRow.DateOfBirth = item.DateOfBirth;
-                dbRow.LastUpdatedDate = now;
-                toUpdate.Add(dbRow);
+
+                string? businessName = dbRow.Businessname, busRegNum = dbRow.Busregnum;
+                bool changed = false;
+                changed |= EnrichField(ref businessName, item.Businessname, "Businessname", key.Item1, key.Item2, key.Item3, busChangelog);
+                changed |= EnrichField(ref busRegNum,     item.Busregnum,   "Busregnum",     key.Item1, key.Item2, key.Item3, busChangelog);
+                if (changed)
+                {
+                    dbRow.Businessname = businessName;
+                    dbRow.Busregnum = busRegNum;
+                    dbRow.LastUpdatedDate = now;
+                    toUpdate.Add(dbRow);
+                }
+
+                // Status is mutable -- always refresh to the latest submitted value,
+                // same policy as the IND side.
+                if (!string.IsNullOrWhiteSpace(item.FacilityStatusCode) && dbRow.FacilityStatusCode != item.FacilityStatusCode)
+                {
+                    dbRow.FacilityStatusCode = item.FacilityStatusCode;
+                    dbRow.LastUpdatedDate = now;
+                    if (!toUpdate.Contains(dbRow)) toUpdate.Add(dbRow);
+                }
             }
             else
             {
@@ -197,6 +228,9 @@ public class DataManagementService
                     CustomerID           = item.CustomerID       ?? string.Empty,
                     DisbursementDate     = item.DisbursementDate ?? string.Empty,
                     DateOfBirth          = item.DateOfBirth      ?? string.Empty,
+                    Businessname         = item.Businessname     ?? string.Empty,
+                    Busregnum            = item.Busregnum        ?? string.Empty,
+                    FacilityStatusCode   = item.FacilityStatusCode ?? string.Empty,
                     CurrenVersion        = 1,
                     CreatedDate          = now,
                     LastUpdatedDate      = now
@@ -221,6 +255,9 @@ public class DataManagementService
             CustomerID       = r.CustomerID?.Data       ?? string.Empty,
             DisbursementDate = r.DisbursementDate?.Data ?? string.Empty,
             DateOfBirth      = r.DateOfBirth            ?? string.Empty,
+            Businessname       = r.Businessname?.Data       ?? string.Empty,
+            Busregnum          = r.Busregnum?.Data          ?? string.Empty,
+            FacilityStatusCode = r.FacilityStatusCode?.Data ?? string.Empty,
         });
         await SaveExcelDataToDatabaseBus(mapped, fileShortName);
     }

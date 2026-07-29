@@ -364,6 +364,11 @@ public class BusinessRef
     public string? DisbursementDate { get; set; } = string.Empty;
     public DateTime CreatedDate { get; set; }
     public DateTime LastUpdatedDate { get; set; }
+    // ── Identity fields for reference-trust validation (mirrors IndividualRef) ──
+    public string? Businessname { get; set; } = string.Empty;
+    public string? Busregnum { get; set; } = string.Empty;
+    // ── Closed-facility tracking ────────────────────────────────────────────
+    public string? FacilityStatusCode { get; set; } = string.Empty;
 }
 public class IndividualRef
 {
@@ -388,6 +393,11 @@ public class IndividualRef
     public string? Surname    { get; set; } = string.Empty;
     public string? FirstName  { get; set; } = string.Empty;
     public string? MiddleNames { get; set; } = string.Empty;
+    // ── Closed-facility tracking ────────────────────────────────────────────
+    // Refreshed to the LATEST submitted value every time this facility is
+    // seen again (unlike names/IDs, status is a mutable real-world state,
+    // not a fact to enrich-once-and-keep).
+    public string? FacilityStatusCode { get; set; } = string.Empty;
 }
 //public class BusinessRef
 //{
