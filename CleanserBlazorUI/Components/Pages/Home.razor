@@ -180,7 +180,7 @@
                         </MudAlert>
                         <MudPaper Class="d-flex flex-row" Elevation="0">
                             <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="REF_ClearSeletedFiles">Reload Cleanser</MudButton>
-                            <MudButton Variant="Variant.Text" Color="Color.Warning" OnClick="REF_InsertThisAsLatesReference">Register / Insert reference(s)</MudButton>
+                            <MudButton Variant="Variant.Text" Color="Color.Warning" OnClick="REF_InsertThisAsLatesReference_WithConfirm">@RegisterButtonLabel</MudButton>
                             <MudSpacer></MudSpacer>
                             <MudButton Variant="Variant.Text" Color="Color.Inherit">DUPLICATE RECORD: @duplicateCount</MudButton>
                             <MudButton Variant="Variant.Text" Color="Color.Inherit">NEW RECORD: @newdata</MudButton>
@@ -342,6 +342,32 @@
         numberOffailedCount = failedRecord.Count.ToString();
         progressIsVisible = "d-none";
     }
+    // ── Register requires a confirmation click ──────────────────────────────
+    // REGISTER deliberately bypasses every CLEAN/UNL check -- that's its whole
+    // point (loading manually-verified records, e.g. names that only *look*
+    // like business names but checked out fine by hand). Since it's an
+    // unchecked path into the single source of truth, require a second click
+    // before it actually runs, so it's never triggered by accident.
+    bool _registerConfirmArmed = false;
+    string RegisterButtonLabel = "Register / Insert reference(s)";
+
+    async Task REF_InsertThisAsLatesReference_WithConfirm()
+    {
+        if (!_registerConfirmArmed)
+        {
+            _registerConfirmArmed = true;
+            RegisterButtonLabel = "Click again to confirm — no CLEAN/UNL check will run";
+            AlertSeverityMessage = "These records will be registered exactly as uploaded, with no CLEAN/UNL check. Click Register again to confirm, or navigate away to cancel.";
+            AlertSeverity = MudBlazor.Severity.Warning;
+            AlertSeverityVisible = "d-block";
+            StateHasChanged();
+            return;
+        }
+        _registerConfirmArmed = false;
+        RegisterButtonLabel = "Register / Insert reference(s)";
+        await REF_InsertThisAsLatesReference();
+    }
+
     async Task REF_InsertThisAsLatesReference()
     {
         StartTimer();
@@ -3070,7 +3096,17 @@
 
                         if (CleanOnlyOrCleanAndReference == false)
                         {
-                            var idChangelog = await DataManagementService.SaveExcelDataToDatabaseInd(mainMatcherTransformer, filename);
+                            // Only persist records that actually passed every check.
+                            // mainMatcherTransformer (aka "allRecords" from the matcher)
+                            // includes everything short of exact intra-file duplicates --
+                            // the real CLEAN/UNL split only happens later, per-record, at
+                            // Excel-write time via ISCleaned(). Without this filter, UNL
+                            // records were being saved into the reference DB right
+                            // alongside clean ones through the normal cleaning flow --
+                            // REFERENCE/REGISTER is meant to be the only path that loads
+                            // unchecked records, by deliberate associate action.
+                            var trulyCleanInd = mainMatcherTransformer.Where(r => ISCleaned(r)).ToList();
+                            var idChangelog = await DataManagementService.SaveExcelDataToDatabaseInd(trulyCleanInd, filename);
                         }
                         byte[] ExcelDataTobeDownloaded = await SaveToExcelAsync(mainMatcherTransformer, _duplicatesInd);
                         await DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
@@ -3153,7 +3189,8 @@
                         if (CleanOnlyOrCleanAndReference == false)
                         {
                             //await DataManagementService.SaveExcelDataToDatabaseBus(ExcelDataRecieved, filename);
-                            await DataManagementService.SaveExcelDataToDatabaseBus(mainMatcherTransformer, filename);
+                            var trulyCleanBus = mainMatcherTransformer.Where(r => ISCleaned(r)).ToList();
+                            await DataManagementService.SaveExcelDataToDatabaseBus(trulyCleanBus, filename);
                         }
                         byte[] ExcelDataTobeDownloaded = await SaveToExcelAsync(mainMatcherTransformer, _duplicatesInd);
                         await DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
