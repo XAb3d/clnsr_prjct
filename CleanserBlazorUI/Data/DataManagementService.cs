@@ -71,6 +71,7 @@ public class DataManagementService
                 string? natID = dbRow.NatIDNum, votersID = dbRow.VotersIDNum,
                         driverLic = dbRow.DriverLicNum, passport = dbRow.PassportNum,
                         ssNum = dbRow.SSNum, ezwich = dbRow.EzwichNum, otherID = dbRow.OtherIDNum;
+                string? surname = dbRow.Surname, firstName = dbRow.FirstName, middleNames = dbRow.MiddleNames;
 
                 bool changed = false;
                 changed |= EnrichField(ref natID,     item.NatIDNum,     "NatIDNum",     key.Item1, key.Item2, key.Item3, changelog);
@@ -80,12 +81,16 @@ public class DataManagementService
                 changed |= EnrichField(ref ssNum,     item.SSNum,        "SSNum",        key.Item1, key.Item2, key.Item3, changelog);
                 changed |= EnrichField(ref ezwich,    item.EzwichNum,    "EzwichNum",    key.Item1, key.Item2, key.Item3, changelog);
                 changed |= EnrichField(ref otherID,   item.OtherIDNum,   "OtherIDNum",   key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref surname,     item.Surname,     "Surname",     key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref firstName,   item.FirstName,   "FirstName",   key.Item1, key.Item2, key.Item3, changelog);
+                changed |= EnrichField(ref middleNames, item.MiddleNames, "MiddleNames", key.Item1, key.Item2, key.Item3, changelog);
 
                 if (changed)
                 {
                     dbRow.NatIDNum = natID; dbRow.VotersIDNum = votersID;
                     dbRow.DriverLicNum = driverLic; dbRow.PassportNum = passport;
                     dbRow.SSNum = ssNum; dbRow.EzwichNum = ezwich; dbRow.OtherIDNum = otherID;
+                    dbRow.Surname = surname; dbRow.FirstName = firstName; dbRow.MiddleNames = middleNames;
                     dbRow.LastUpdatedDate = now;
                     toUpdate.Add(dbRow);
                 }
@@ -108,6 +113,9 @@ public class DataManagementService
                     SSNum                = item.SSNum                       ?? string.Empty,
                     EzwichNum            = item.EzwichNum                   ?? string.Empty,
                     OtherIDNum           = item.OtherIDNum                  ?? string.Empty,
+                    Surname              = item.Surname                    ?? string.Empty,
+                    FirstName            = item.FirstName                  ?? string.Empty,
+                    MiddleNames          = item.MiddleNames                ?? string.Empty,
                     CurrenVersion        = 1,
                     CreatedDate          = now,
                     LastUpdatedDate      = now
@@ -144,6 +152,7 @@ public class DataManagementService
             OtherIDNum           = r.OtherIDNum?.Data           ?? string.Empty,
             Surname              = r.Surname?.Data              ?? string.Empty,
             FirstName            = r.FirstName?.Data            ?? string.Empty,
+            MiddleNames          = r.MiddleNames?.Data          ?? string.Empty,
         });
         return await SaveExcelDataToDatabaseInd(mapped, fileShortName);
     }

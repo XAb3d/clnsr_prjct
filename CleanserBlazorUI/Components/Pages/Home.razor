@@ -348,7 +348,11 @@
         passedRecord.Clear();
         failedRecord.Clear();
         progressIsVisible = "d-block";
-        var _spreadsheetFileAndChipColor = spreadsheetFileAndChipColor.Where(passed => passed.IsPassed == false).ToList();
+        // Only process files whose subscriber code was actually recognized
+        // (IsPassed == true). The inverse condition here previously meant this
+        // silently skipped every file for a subscriber the system already
+        // knows -- exactly backwards from what "Register" is meant to do.
+        var _spreadsheetFileAndChipColor = spreadsheetFileAndChipColor.Where(passed => passed.IsPassed == true).ToList();
         foreach (var item in _spreadsheetFileAndChipColor)
         {
             await INSERTREF_REF_GetSpreadsheetData(item.SpreadsheetFile);
@@ -608,19 +612,22 @@
                     }
                     else
                     {
-                        AlertSeverityMessage = "Success: The uploaded spreadsheet contains the expected headers";
+                        await DataManagementService.SaveExcelDataToDatabaseInd(ExcelDataRecieved, REF_filename);
+                        File.Delete(FullExcelDataFilePath!);
+                        AlertSeverityMessage = $"Success: {ExcelDataRecieved.Count} record(s) registered to the reference database.";
                         AlertSeverity = MudBlazor.Severity.Success;
                         AlertSeverityVisible = "d-block";
                         StateHasChanged();
-                        await DataManagementService.Initialize_SaveExcelDataToDatabaseInd(ExcelDataRecieved, REF_filename);
-                        File.Delete(FullExcelDataFilePath!);
-                        AlertSeverityVisible = "d-none";
                     }
                 }
 
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                AlertSeverityMessage = $"Registration failed: {ex.Message}";
+                AlertSeverity = MudBlazor.Severity.Error;
+                AlertSeverityVisible = "d-block";
+                StateHasChanged();
             }
             return CleaningStatus.CompletedWithUnknownErrors;
         }
@@ -673,19 +680,22 @@
                     }
                     else
                     {
-                        AlertSeverityMessage = "Success: The uploaded spreadsheet contains the expected headers";
+                        await DataManagementService.SaveExcelDataToDatabaseBus(ExcelDataRecieved, REF_filename);
+                        File.Delete(FullExcelDataFilePath!);
+                        AlertSeverityMessage = $"Success: {ExcelDataRecieved.Count} record(s) registered to the reference database.";
                         AlertSeverity = MudBlazor.Severity.Success;
                         AlertSeverityVisible = "d-block";
                         StateHasChanged();
-                        await DataManagementService.Initialize_SaveExcelDataToDatabaseBus(ExcelDataRecieved, REF_filename);
-                        File.Delete(FullExcelDataFilePath!);
-                        AlertSeverityVisible = "d-none";
                     }
                 }
 
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                AlertSeverityMessage = $"Registration failed: {ex.Message}";
+                AlertSeverity = MudBlazor.Severity.Error;
+                AlertSeverityVisible = "d-block";
+                StateHasChanged();
             }
             return CleaningStatus.CompletedWithUnknownErrors;
         }

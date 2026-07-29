@@ -387,6 +387,7 @@ public class IndividualRef
     // ── Sprint 10: Name fields for reference-trust validation ─────────────────
     public string? Surname    { get; set; } = string.Empty;
     public string? FirstName  { get; set; } = string.Empty;
+    public string? MiddleNames { get; set; } = string.Empty;
 }
 //public class BusinessRef
 //{
