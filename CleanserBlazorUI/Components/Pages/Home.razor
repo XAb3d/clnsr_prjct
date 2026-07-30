@@ -2851,6 +2851,72 @@
         return closed;
     }
 
+    // ── Phase 4: unify reference + incoming for cross-record checks ─────────
+    // The existing cross-record checks (RunAllCrossRecordChecksIND — DOB/name
+    // conflict, GHA card conflict) only ever compared records WITHIN the same
+    // uploaded file. A submission that matched what's stored in reference was
+    // silently trusted, with no check that it actually agreed with reference
+    // on name or ID -- only DOB and disbursement date got compared against
+    // history (via the matcher itself), name and ID did not.
+    //
+    // Rather than duplicating comparison logic, reference is folded in as
+    // "virtual" records -- one synthetic IndividualContext per CustomerID
+    // present in this file, built from whichever reference row for that
+    // customer was most recently updated. Injected into the same list that
+    // RunAllCrossRecordChecksIND already processes, the existing grouping-by-
+    // CustomerID logic naturally compares a real incoming record against its
+    // own reference history the same way it already compares two records
+    // within one file. The caller must remove these synthetic records again
+    // afterward (via the returned marker set) -- they must never reach
+    // output, DB save, or counts.
+    List<IndividualContext> BuildReferenceVirtualRecordsInd(List<IndividualContext> incoming, List<IndividualRef> fromDatabase)
+    {
+        var virtualRecords = new List<IndividualContext>();
+        if (incoming == null || incoming.Count == 0 || fromDatabase == null || fromDatabase.Count == 0)
+            return virtualRecords;
+
+        var customerKeys = incoming
+            .Select(r => NormalizeCustomerId(r.CustomerID?.Data))
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .ToHashSet();
+
+        var refByCustomer = fromDatabase
+            .Where(r => customerKeys.Contains(NormalizeCustomerId(r.CustomerID)))
+            .GroupBy(r => NormalizeCustomerId(r.CustomerID));
+
+        foreach (var group in refByCustomer)
+        {
+            // Most recently updated row for this customer represents what we
+            // currently trust as their identity.
+            var canonical = group.OrderByDescending(r => r.LastUpdatedDate).First();
+
+            CellDataAndStatus Cell(string? v)
+            {
+                var value = v ?? string.Empty;
+                return new CellDataAndStatus(value) { Data = value };
+            }
+
+            virtualRecords.Add(new IndividualContext
+            {
+                CustomerID           = Cell(canonical.CustomerID),
+                CreditFacilityAccNum = Cell(canonical.CreditFacilityAccNum),
+                DateOfBirth          = Cell(canonical.DateOfBirth),
+                Surname              = Cell(canonical.Surname),
+                FirstName            = Cell(canonical.FirstName),
+                MiddleNames          = Cell(canonical.MiddleNames),
+                NatIDNum             = Cell(canonical.NatIDNum),
+                VotersIDNum          = Cell(canonical.VotersIDNum),
+                DriverLicNum         = Cell(canonical.DriverLicNum),
+                PassportNum          = Cell(canonical.PassportNum),
+                SSNum                = Cell(canonical.SSNum),
+                EzwichNum            = Cell(canonical.EzwichNum),
+                OtherIDNum           = Cell(canonical.OtherIDNum),
+            });
+        }
+
+        return virtualRecords;
+    }
+
     (List<IndividualContext> allRecords, List<IndividualContext> duplicatesInd, string correctDateOfBirth, string dobIssues, string matchdata, string newdata, string duplicatescount) REF_MainMatcherTransformerInd_Clean_IND(List<IndividualRef> fromDatabase, List<IndividualContext> _fromExcelFile, bool handleDuplicates = true)
     {
         // Initialize lists to store processed Excel records and duplicates
@@ -3156,7 +3222,14 @@
                         isSubscriber_X_or_Y = await DataManagementService.GetSubscribeX_or_Y(filename);
                         var (mainMatcherTransformer, _duplicatesInd, _correctDateOfBirth, _dobIssues, _matchdata, _newdata, _duplicateCount) = REF_MainMatcherTransformerInd_Clean_IND(RefData, ExcelDataRecieved);
                         var mainMatcherTransformer_temp = DuplicateUser_CustomerIDAndDateOfBirth(mainMatcherTransformer);
-                        mainMatcherTransformer_temp = RunAllCrossRecordChecksIND(mainMatcherTransformer_temp);
+                        // Fold reference in as virtual records so name/ID conflicts against
+                        // history get caught by the same cross-record logic that already
+                        // catches conflicts within this file -- then discard the virtual
+                        // records again before anything else sees them.
+                        var referenceVirtualsInd = BuildReferenceVirtualRecordsInd(mainMatcherTransformer_temp, RefData);
+                        var forCrossChecksInd = mainMatcherTransformer_temp.Concat(referenceVirtualsInd).ToList();
+                        forCrossChecksInd = RunAllCrossRecordChecksIND(forCrossChecksInd);
+                        mainMatcherTransformer_temp = forCrossChecksInd.Except(referenceVirtualsInd).ToList();
                         mainMatcherTransformer = mainMatcherTransformer_temp;
                         correctDateOfBirth = _correctDateOfBirth;
                         dobIssues = _dobIssues;
