@@ -1,0 +1,710 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cleanser App — Associate Manual</title>
+<style>
+  :root {
+    --navy: #17233f;
+    --navy-light: #24365e;
+    --paper: #faf8f3;
+    --paper-panel: #ffffff;
+    --ink: #26241f;
+    --ink-soft: #5a5648;
+    --gold: #b8862f;
+    --gold-soft: #e8d9b5;
+    --line: #ddd6c4;
+    --info-bg: #eef3f7;
+    --info-line: #4a6b8a;
+    --warn-bg: #fbf1e3;
+    --warn-line: var(--gold);
+    --fix-bg: #eef4ec;
+    --fix-line: #4c7a4f;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    font-family: Georgia, 'Times New Roman', serif;
+    color: var(--ink);
+    background: var(--paper);
+    line-height: 1.65;
+  }
+
+  .layout {
+    display: flex;
+    min-height: 100vh;
+  }
+
+  nav.sidebar {
+    width: 280px;
+    flex-shrink: 0;
+    background: var(--navy);
+    color: #dfe4ee;
+    padding: 32px 22px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  nav.sidebar h1 {
+    font-size: 1.15rem;
+    color: #fff;
+    margin: 0 0 4px 0;
+    font-weight: 600;
+  }
+
+  nav.sidebar .subtitle {
+    font-family: 'Courier New', monospace;
+    font-size: 0.75rem;
+    color: var(--gold-soft);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 28px;
+  }
+
+  nav.sidebar ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: chapter;
+  }
+
+  nav.sidebar li {
+    counter-increment: chapter;
+    margin-bottom: 2px;
+  }
+
+  nav.sidebar a {
+    display: block;
+    color: #c3cbdc;
+    text-decoration: none;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    padding: 8px 10px;
+    border-radius: 4px;
+    transition: background 0.15s, color 0.15s;
+  }
+
+  nav.sidebar a::before {
+    content: counter(chapter, decimal-leading-zero) "  ";
+    color: var(--gold-soft);
+  }
+
+  nav.sidebar a:hover {
+    background: var(--navy-light);
+    color: #fff;
+  }
+
+  main {
+    flex: 1;
+    max-width: 860px;
+    padding: 56px 64px 120px 64px;
+  }
+
+  header.hero {
+    border-bottom: 3px solid var(--navy);
+    padding-bottom: 24px;
+    margin-bottom: 48px;
+  }
+
+  header.hero .eyebrow {
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 10px;
+  }
+
+  header.hero h1 {
+    font-size: 2.3rem;
+    margin: 0 0 12px 0;
+    color: var(--navy);
+  }
+
+  header.hero p.lede {
+    font-size: 1.1rem;
+    color: var(--ink-soft);
+    max-width: 640px;
+    margin: 0;
+  }
+
+  section.chapter {
+    margin-bottom: 64px;
+    scroll-margin-top: 24px;
+  }
+
+  section.chapter h2 {
+    font-size: 1.6rem;
+    color: var(--navy);
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+  }
+
+  section.chapter h2 .num {
+    font-family: 'Courier New', monospace;
+    color: var(--gold);
+    margin-right: 10px;
+  }
+
+  section.chapter h3 {
+    font-size: 1.15rem;
+    color: var(--navy-light);
+    margin-top: 30px;
+  }
+
+  p { margin: 0 0 14px 0; }
+
+  ol.steps, ul.steps {
+    padding-left: 0;
+    list-style: none;
+    counter-reset: step;
+    margin: 20px 0;
+  }
+
+  ol.steps li {
+    counter-increment: step;
+    position: relative;
+    padding: 12px 16px 12px 52px;
+    margin-bottom: 8px;
+    background: var(--paper-panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+  }
+
+  ol.steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 14px;
+    top: 12px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--navy);
+    color: #fff;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  code {
+    font-family: 'Courier New', monospace;
+    background: #f0ede2;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.92em;
+    color: #40391f;
+  }
+
+  .callout {
+    border-left: 4px solid;
+    border-radius: 4px;
+    padding: 16px 20px;
+    margin: 20px 0;
+  }
+
+  .callout .callout-label {
+    font-family: 'Courier New', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: bold;
+    margin-bottom: 6px;
+  }
+
+  .callout.info { background: var(--info-bg); border-color: var(--info-line); }
+  .callout.info .callout-label { color: var(--info-line); }
+
+  .callout.warn { background: var(--warn-bg); border-color: var(--warn-line); }
+  .callout.warn .callout-label { color: #8a6114; }
+
+  .callout.fix { background: var(--fix-bg); border-color: var(--fix-line); }
+  .callout.fix .callout-label { color: var(--fix-line); }
+
+  .screen {
+    background: #1e2536;
+    color: #d7dbe8;
+    border-radius: 8px;
+    padding: 18px 22px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.88rem;
+    margin: 18px 0;
+    border: 1px solid #313b52;
+  }
+
+  .screen .screen-label {
+    color: var(--gold-soft);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+  }
+
+  .screen .btn {
+    display: inline-block;
+    background: #3a4566;
+    color: #fff;
+    padding: 3px 10px;
+    border-radius: 4px;
+    margin: 2px 3px 2px 0;
+  }
+
+  .screen .field {
+    display: inline-block;
+    background: #12172470;
+    border: 1px dashed #4d597b;
+    padding: 2px 10px;
+    border-radius: 4px;
+    margin: 2px 3px 2px 0;
+  }
+
+  table.ref-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 20px 0;
+    background: var(--paper-panel);
+  }
+
+  table.ref-table th, table.ref-table td {
+    text-align: left;
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    font-size: 0.94rem;
+  }
+
+  table.ref-table th {
+    background: var(--navy);
+    color: #fff;
+    font-family: 'Courier New', monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  table.ref-table tr:nth-child(even) td {
+    background: #f4f1e8;
+  }
+
+  .glossary dt {
+    font-weight: bold;
+    color: var(--navy);
+    margin-top: 16px;
+  }
+
+  .glossary dd {
+    margin: 4px 0 0 0;
+    color: var(--ink-soft);
+  }
+
+  footer.manual-footer {
+    border-top: 1px solid var(--line);
+    padding-top: 20px;
+    margin-top: 40px;
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+  }
+
+  @media (max-width: 900px) {
+    .layout { flex-direction: column; }
+    nav.sidebar { width: 100%; height: auto; position: relative; }
+    main { padding: 32px 20px 80px 20px; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <nav class="sidebar">
+    <h1>Cleanser App</h1>
+    <div class="subtitle">Associate Manual</div>
+    <ol>
+      <li><a href="#ch1">Welcome</a></li>
+      <li><a href="#ch2">Before You Start</a></li>
+      <li><a href="#ch3">Cleaning a File</a></li>
+      <li><a href="#ch4">Reading Your Results</a></li>
+      <li><a href="#ch5">Why a Record Was Rejected</a></li>
+      <li><a href="#ch6">Manually Rescuing Records</a></li>
+      <li><a href="#ch7">Registering Records</a></li>
+      <li><a href="#ch8">The Unloadable Log</a></li>
+      <li><a href="#ch9">Troubleshooting</a></li>
+      <li><a href="#ch10">Glossary</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow">XDS Credit Bureau — Internal Operations Guide</div>
+      <h1>Cleanser App: Associate Manual</h1>
+      <p class="lede">A full walkthrough of the day-to-day workflow — cleaning a file,
+      understanding why records get rejected, rescuing and re-registering them,
+      and generating the reports you need to send. Written for the person doing
+      the work, not the person who built the tool.</p>
+    </header>
+
+    <!-- ===================== CHAPTER 1 ===================== -->
+    <section class="chapter" id="ch1">
+      <h2><span class="num">01</span>Welcome</h2>
+      <p>The Cleanser app takes the raw files financial institutions submit each month
+      — Individual (IND) and Business (BUS) credit records — and gets them ready
+      for loading into the bureau's system. It checks every field against Bank of
+      Ghana reporting standards, fixes what it safely can, and sets aside anything
+      it can't be sure about so a human makes the final call.</p>
+
+      <p>This manual walks through that whole cycle: uploading a file, reading what
+      came back, understanding <em>why</em> something didn't pass, fixing it by
+      hand when needed, and telling the system about that fix so it doesn't ask
+      again next month.</p>
+
+      <div class="callout info">
+        <div class="callout-label">Who this is for</div>
+        Associates running monthly cleaning cycles for subscriber institutions.
+        No coding knowledge needed — everything here is about what you click and
+        what it means, not how it's built.
+      </div>
+    </section>
+
+    <!-- ===================== CHAPTER 2 ===================== -->
+    <section class="chapter" id="ch2">
+      <h2><span class="num">02</span>Before You Start</h2>
+
+      <h3>What you need</h3>
+      <p>A submission file from a subscriber institution (ADB, UMB, or others),
+      in the standard template format, named with the subscriber's code as the
+      first part of the filename — for example <code>ADB2026_07_IND.xlsx</code>.</p>
+
+      <div class="callout warn">
+        <div class="callout-label">The one filename rule that actually matters</div>
+        The system reads the <strong>text before the first underscore</strong> in
+        the filename to figure out which subscriber the file belongs to. Whatever
+        you do to a filename afterward — adding <code>_CLEAN</code>,
+        <code>_RESCUED</code>, a date, whatever — is fine, as long as that first
+        segment stays exactly as it was on the original submission. Change that
+        part, and the system may resolve to the wrong subscriber, or fail to
+        resolve one at all.
+      </div>
+
+      <h3>The two working views</h3>
+      <p>The main screen has two modes you'll switch between, using the buttons
+      at the top:</p>
+      <div class="screen">
+        <div class="screen-label">Top of screen</div>
+        <span class="btn">CLEANING A FILE</span>
+        <span class="btn">REFERENCE / REGISTER RECORDS</span>
+      </div>
+      <p><strong>CLEANING A FILE</strong> is where you'll spend most of your time
+      — this is the monthly cycle. <strong>REFERENCE / REGISTER RECORDS</strong>
+      is a separate, less-frequent action, covered in Chapter 7.</p>
+    </section>
+
+    <!-- ===================== CHAPTER 3 ===================== -->
+    <section class="chapter" id="ch3">
+      <h2><span class="num">03</span>Cleaning a File</h2>
+
+      <ol class="steps">
+        <li>Make sure you're on the <strong>CLEANING A FILE</strong> tab.</li>
+        <li>Upload the subscriber's submission file using the file picker.</li>
+        <li>Click <strong>Run Cleanser</strong>. Processing time depends on file
+        size — larger files (thousands of records) take longer. Don't close the
+        tab while it's running.</li>
+        <li>When it finishes, a row of counters appears showing what happened to
+        the file (covered in the next chapter).</li>
+        <li>Download the <strong>CLEAN</strong> and <strong>UNLOADABLE (UNL)</strong>
+        sheets from the output workbook.</li>
+      </ol>
+
+      <div class="callout info">
+        <div class="callout-label">What "cleaning" actually does</div>
+        Every field in every record gets checked and, where possible, corrected —
+        phone number formats, date formats, ID number formats, address fields, and
+        so on. Records that pass every check go to <strong>CLEAN</strong>. Records
+        that fail one or more checks the system isn't confident enough to
+        auto-fix go to <strong>UNLOADABLE</strong> for a human to look at.
+      </div>
+    </section>
+
+    <!-- ===================== CHAPTER 4 ===================== -->
+    <section class="chapter" id="ch4">
+      <h2><span class="num">04</span>Reading Your Results</h2>
+
+      <p>After a run, you'll see a row like this:</p>
+      <div class="screen">
+        <div class="screen-label">Stats row</div>
+        <span class="field">DUPLICATE RECORD: 12</span>
+        <span class="field">NEW RECORD: 340</span>
+        <span class="field">MATCH RECORD: 891</span>
+        <span class="field">DOBISSUES: 4</span>
+        <span class="field">CORRECT DOB: 887</span>
+        <span class="field">TOTAL: 1247</span>
+      </div>
+
+      <table class="ref-table">
+        <tr><th>Counter</th><th>What it means</th></tr>
+        <tr><td>DUPLICATE RECORD</td><td>Records that appear more than once in this same submission (same account/customer combination).</td></tr>
+        <tr><td>NEW RECORD</td><td>Records not seen before in the reference database — first time this account/customer has been submitted.</td></tr>
+        <tr><td>MATCH RECORD</td><td>Records that matched something already in the reference database from a prior submission.</td></tr>
+        <tr><td>DOBISSUES</td><td>Records where the Date of Birth didn't match what's on file for that customer.</td></tr>
+        <tr><td>CORRECT DOB</td><td>Matched records where the Date of Birth agreed with what's on file.</td></tr>
+        <tr><td>TOTAL</td><td>Every record read from the uploaded file, regardless of outcome.</td></tr>
+      </table>
+
+      <p>These counters tell you the shape of the file at a glance, but the real
+      detail — <em>which specific records</em> ended up where, and <em>why</em>
+      — is in the downloaded CLEAN and UNL sheets themselves.</p>
+    </section>
+
+    <!-- ===================== CHAPTER 5 ===================== -->
+    <section class="chapter" id="ch5">
+      <h2><span class="num">05</span>Why a Record Was Rejected</h2>
+
+      <p>Every record that lands in UNL has a reason attached — usually visible as
+      an error note on the specific field that failed. Some of the more common
+      and less obvious ones are worth understanding in detail:</p>
+
+      <h3>Disbursement date "doesn't match previous submission"</h3>
+      <p>For most facility types, a disbursement date that doesn't match what's
+      on file from a prior month is a real red flag — it usually means a data
+      entry error. But <strong>overdraft facilities are the exception</strong>:
+      they legitimately get redrawn on new dates every month, sometimes more than
+      once in the same submission. The system now understands this — as of the
+      most recent update, overdraft records with a new (but genuine) disbursement
+      date are no longer wrongly flagged. If you still see this on an overdraft
+      record, look closely; it may be a real discrepancy worth checking.</p>
+
+      <div class="callout fix">
+        <div class="callout-label">What changed</div>
+        Before this fix, a facility's disbursement-date history could get
+        collapsed down to just one remembered date internally, so even a
+        genuinely valid earlier date could get wrongly flagged. That's fixed —
+        the system now checks a new date against the full history for that
+        facility, not just the last one it happened to remember.
+      </div>
+
+      <h3>Same Customer ID, different Ghana Card numbers</h3>
+      <p>If the same Customer ID shows up linked to two <strong>different GHA
+      (Ghana Card) numbers</strong> across records — even if one is filed under
+      "National ID" and the other under "Voter ID" or any other ID column — the
+      system flags this as a conflict. A person only has one Ghana Card number,
+      so two different ones under the same Customer ID means something is wrong:
+      either a typo in one of the ID fields, or these are actually two different
+      people who've been given the same Customer ID by mistake.</p>
+
+      <table class="ref-table">
+        <tr><th>Field</th><th>Value</th></tr>
+        <tr><td>CustomerID</td><td>38849</td></tr>
+        <tr><td>NatIDNum (record 1)</td><td>GHA-712066477-4</td></tr>
+        <tr><td>VotersIDNum (record 2)</td><td>GHA-721943099-6</td></tr>
+      </table>
+      <p>This exact pattern — same Customer ID, two different GHA numbers, under
+      two different ID columns — is what triggers the flag. Note that this rule is
+      specific to GHA-format numbers; a mismatch between two non-Ghana-Card ID
+      types under the same Customer ID does not trigger it, since only the Ghana
+      Card is guaranteed unique per person.</p>
+
+      <div class="callout warn">
+        <div class="callout-label">How to resolve it</div>
+        Check the original submission source. If it's a typo, correct the wrong
+        GHA number and the record can be manually rescued (Chapter 6). If it
+        genuinely looks like two different people were submitted under one
+        Customer ID, that needs to go back to the subscriber for correction —
+        don't guess which one is right.
+      </div>
+    </section>
+
+    <!-- ===================== CHAPTER 6 ===================== -->
+    <section class="chapter" id="ch6">
+      <h2><span class="num">06</span>Manually Rescuing Records</h2>
+
+      <p>Sometimes a record in UNL just needs a human correction — a typo fixed,
+      a format cleaned up, a genuine discrepancy resolved after checking the
+      source. When that happens:</p>
+
+      <ol class="steps">
+        <li>Open the UNL sheet and find the record.</li>
+        <li>Make the correction directly in the file (or in your working copy of
+        it).</li>
+        <li>Move the corrected record into the <strong>CLEAN</strong> sheet —
+        add it as a new row there.</li>
+        <li>Keep going until you've rescued everything you're confident about
+        for this cycle.</li>
+      </ol>
+
+      <div class="callout warn">
+        <div class="callout-label">This isn't the end of the story</div>
+        A record you've manually rescued this way is now correct in <em>this
+        month's</em> output — but the system's memory of what's "normal" for
+        that customer doesn't know about your correction yet. Without the next
+        step (Chapter 7), the exact same record could get flagged again next
+        month. Don't skip it.
+      </div>
+    </section>
+
+    <!-- ===================== CHAPTER 7 ===================== -->
+    <section class="chapter" id="ch7">
+      <h2><span class="num">07</span>Registering Records</h2>
+
+      <p>This is how you tell the system "these records are correct, remember
+      them" — so manually rescued records (and initial reference loads for a new
+      subscriber) don't get flagged again in future months.</p>
+
+      <ol class="steps">
+        <li>Switch to the <strong>REFERENCE / REGISTER RECORDS</strong> tab.</li>
+        <li>Upload your <strong>corrected CLEAN sheet</strong> — the one that
+        now includes the records you manually rescued in Chapter 6.</li>
+        <li>Click <strong>Register / Insert reference(s)</strong>.</li>
+        <li>Records in that file get registered into the reference database.
+        Re-uploading the same file later won't create duplicates — it's safe to
+        re-run if you're not sure whether something already went through.</li>
+      </ol>
+
+      <div class="callout info">
+        <div class="callout-label">Why one tab does two jobs</div>
+        This same tab is also used for loading a brand-new subscriber's initial
+        reference data for the first time. Both cases are really the same
+        action underneath — "register these records as trusted" — the only
+        difference is whether it's the first-ever load or a monthly correction.
+      </div>
+
+      <div class="callout warn">
+        <div class="callout-label">Don't forget the filename rule</div>
+        Same rule as Chapter 2 — keep the original subscriber-code prefix intact
+        on whatever file you upload here. This tab uses the same filename parsing
+        as everywhere else in the app.
+      </div>
+    </section>
+
+    <!-- ===================== CHAPTER 8 ===================== -->
+    <section class="chapter" id="ch8">
+      <h2><span class="num">08</span>The Unloadable Log</h2>
+
+      <p>After a cleaning run that produced UNL records, a new panel appears
+      below the stats row, letting you generate the unloadable log for that
+      file — the report you send back to the subscriber summarizing what was
+      rejected and why.</p>
+
+      <div class="screen">
+        <div class="screen-label">Unloadable Log panel</div>
+        <span class="field">Associate</span>
+        <span class="field">Subscriber Name</span>
+        <span class="field">Institution Type</span>
+        <span class="field">Comments</span>
+        <br><br>
+        ☐ Remember Subscriber Name / Institution Type for next time
+        <br><br>
+        <span class="btn">Generate Unloadable Log</span>
+      </div>
+
+      <ol class="steps">
+        <li>Type in your name under <strong>Associate</strong>.</li>
+        <li>The first time you generate a log for a given subscriber, fill in
+        <strong>Subscriber Name</strong> and <strong>Institution Type</strong>
+        — leave <strong>Remember...</strong> checked, and you won't need to type
+        these again for that subscriber next month.</li>
+        <li>Add anything relevant under <strong>Comments</strong>.</li>
+        <li>Click <strong>Generate Unloadable Log</strong> — an Excel file
+        downloads with the header row plus two rejection breakdown tables
+        (Demographic Information and Financial Information).</li>
+      </ol>
+
+      <div class="callout warn">
+        <div class="callout-label">Still manual for now</div>
+        <strong>Date Emailed</strong> and <strong>Date Fixed</strong> are left
+        blank in the generated log — fill these in yourself once you've actually
+        sent it and once a correction comes back. Automating this end-to-end is
+        planned but not built yet.
+      </div>
+
+      <div class="callout info">
+        <div class="callout-label">What's coming next</div>
+        Right now, each run generates a fresh, standalone log file — it doesn't
+        append to a running master log automatically, so copy the row in
+        yourself if you're tracking history across months. Storing this log
+        as a proper table in the database (instead of a one-off spreadsheet
+        each time) is planned as a future improvement.
+      </div>
+    </section>
+
+    <!-- ===================== CHAPTER 9 ===================== -->
+    <section class="chapter" id="ch9">
+      <h2><span class="num">09</span>Troubleshooting</h2>
+
+      <h3>"There is already an object named 'X' in the database"</h3>
+      <p>This is a developer-side database error, not something you'll hit in
+      normal day-to-day use of the app. If you see it, the app likely needs a
+      database update from IT/development — it's not something to work around
+      yourself.</p>
+
+      <h3>The Unloadable Log panel isn't showing up</h3>
+      <p>It only appears after a cleaning run that produced at least one UNL
+      record, in the current session. If the file you ran was completely clean
+      (no rejections), there's nothing to report, so the panel correctly stays
+      hidden. Try a file you know has rejections to confirm it's working.</p>
+
+      <h3>A record I registered still gets flagged next month</h3>
+      <p>Double-check the filename prefix rule from Chapter 2/7 — if the
+      subscriber code couldn't be resolved from the filename, the registration
+      may not have gone where you expected. Also confirm you registered the
+      <em>corrected</em> version of the record (post-rescue), not the original
+      rejected one.</p>
+
+      <h3>Something looks wrong and you're not sure why</h3>
+      <p>Don't guess. Flag it to the development team with the filename,
+      subscriber, and the specific record(s) in question — cross-record checks
+      like the GHA card conflict rule are deliberately conservative, but they're
+      not infallible, and a genuinely unusual case is worth a second pair of
+      eyes.</p>
+    </section>
+
+    <!-- ===================== CHAPTER 10 ===================== -->
+    <section class="chapter" id="ch10">
+      <h2><span class="num">10</span>Glossary</h2>
+      <dl class="glossary">
+        <dt>CLEAN</dt>
+        <dd>Records that passed every check and are ready to load.</dd>
+
+        <dt>UNL / Unloadable</dt>
+        <dd>Records that failed one or more checks and need a human decision
+        before they can be loaded.</dd>
+
+        <dt>Subscriber Code</dt>
+        <dd>The short code identifying a financial institution (e.g. ADB, UMB),
+        derived from the leading part of a submission filename.</dd>
+
+        <dt>Reference Database</dt>
+        <dd>The system's memory of previously-trusted records, used to detect
+        matches, duplicates, and mismatches on new submissions.</dd>
+
+        <dt>Overdraft Facility</dt>
+        <dd>A credit facility type that can legitimately be redrawn on new
+        dates repeatedly — unlike a term loan, which has one disbursement date.</dd>
+
+        <dt>GHA Card / Ghana Card</dt>
+        <dd>Ghana's national identification number, uniquely assigned per
+        person — format looks like <code>GHA-XXXXXXXXX-X</code>.</dd>
+
+        <dt>Manually Rescued Record</dt>
+        <dd>A record originally rejected to UNL, then corrected by hand and
+        moved into the CLEAN output for that month.</dd>
+
+        <dt>Registering a Record</dt>
+        <dd>Uploading a record (via the REFERENCE / REGISTER RECORDS tab) so the
+        system trusts it going forward, without re-running it through cleaning.</dd>
+      </dl>
+    </section>
+
+    <footer class="manual-footer">
+      Cleanser App — Associate Manual · Last updated 2026-07-28 · XDS Credit
+      Bureau, Data Operations. For technical documentation, see
+      <code>README.md</code> and <code>CHANGELOG.md</code> in the project
+      repository.
+    </footer>
+  </main>
+</div>
+</body>
+</html>
