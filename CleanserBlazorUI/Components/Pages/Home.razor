@@ -2762,6 +2762,95 @@
             AddCellError(customer, "CUSTOMERID: CUSTOMERID CANNOT BE THE SAME AS FACILITY ACCOUNT NUMBER");
         }
     }
+
+    // ── Closed-facility routing ──────────────────────────────────────────────
+    // A facility already reported closed in a prior submission, reappearing
+    // with the same status, is redundant information for the destination
+    // system -- diverted to its own CLOSED sheet instead of CLEAN. Matched on
+    // the same (FacilityAccNum, CustomerID, DisbursementDate) key used
+    // everywhere else for reference matching. Only diverted when there's no
+    // discrepancy on the identity fields too (DOB/names for IND,
+    // Businessname/Busregnum for BUS) -- if those disagree, something's
+    // actually wrong and it should fall through to normal handling instead of
+    // being silently filed away as "just a closed repeat."
+    List<IndividualContext> ExtractClosedFacilitiesInd(List<IndividualContext> cleanCandidates, List<IndividualRef> fromDatabase)
+    {
+        var closed = new List<IndividualContext>();
+        if (cleanCandidates == null || cleanCandidates.Count == 0) return closed;
+
+        var refIndex = new Dictionary<(string, string, string), IndividualRef>();
+        foreach (var r in fromDatabase)
+        {
+            var k = (NormalizeAccountNumber(r.CreditFacilityAccNum), NormalizeCustomerId(r.CustomerID), (r.DisbursementDate ?? string.Empty).Trim());
+            refIndex[k] = r; // last-write-wins is fine here; an exact 3-part match should be unique in practice
+        }
+
+        foreach (var record in cleanCandidates)
+        {
+            var key = (NormalizeAccountNumber(record.CreditFacilityAccNum?.Data),
+                       NormalizeCustomerId(record.CustomerID?.Data),
+                       (record.DisbursementDate?.Data ?? string.Empty).Trim());
+
+            if (!refIndex.TryGetValue(key, out var refRow)) continue;
+
+            bool refClosed = string.Equals((refRow.FacilityStatusCode ?? string.Empty).Trim(), "C", StringComparison.OrdinalIgnoreCase);
+            bool incomingClosed = string.Equals((record.FacilityStatusCode?.Data ?? string.Empty).Trim(), "C", StringComparison.OrdinalIgnoreCase);
+            if (!refClosed || !incomingClosed) continue;
+
+            bool dobMatches = string.IsNullOrWhiteSpace(refRow.DateOfBirth) ||
+                string.Equals(refRow.DateOfBirth.Trim(), (record.DateOfBirth?.Data ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+            bool nameMatches =
+                (string.IsNullOrWhiteSpace(refRow.Surname) || string.Equals(refRow.Surname.Trim(), (record.Surname?.Data ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(refRow.FirstName) || string.Equals(refRow.FirstName.Trim(), (record.FirstName?.Data ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase)) &&
+                (string.IsNullOrWhiteSpace(refRow.MiddleNames) || string.Equals(refRow.MiddleNames.Trim(), (record.MiddleNames?.Data ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase));
+
+            if (dobMatches && nameMatches)
+            {
+                closed.Add(record);
+            }
+        }
+        return closed;
+    }
+
+    List<BusinessContext> ExtractClosedFacilitiesBus(List<BusinessContext> cleanCandidates, List<BusinessRef> fromDatabase)
+    {
+        var closed = new List<BusinessContext>();
+        if (cleanCandidates == null || cleanCandidates.Count == 0) return closed;
+
+        var refIndex = new Dictionary<(string, string, string), BusinessRef>();
+        foreach (var r in fromDatabase)
+        {
+            var k = (NormalizeAccountNumber(r.CreditFacilityAccNum), NormalizeCustomerId(r.CustomerID), (r.DisbursementDate ?? string.Empty).Trim());
+            refIndex[k] = r;
+        }
+
+        foreach (var record in cleanCandidates)
+        {
+            var key = (NormalizeAccountNumber(record.Facilityaccnum?.Data),
+                       NormalizeCustomerId(record.CustomerID?.Data),
+                       (record.DisbursementDate?.Data ?? string.Empty).Trim());
+
+            if (!refIndex.TryGetValue(key, out var refRow)) continue;
+
+            bool refClosed = string.Equals((refRow.FacilityStatusCode ?? string.Empty).Trim(), "C", StringComparison.OrdinalIgnoreCase);
+            bool incomingClosed = string.Equals((record.FacilityStatusCode?.Data ?? string.Empty).Trim(), "C", StringComparison.OrdinalIgnoreCase);
+            if (!refClosed || !incomingClosed) continue;
+
+            // Business has no DOB/name equivalent to double-check against -- Businessname
+            // and Busregnum are the closest identity fields available.
+            bool nameMatches = string.IsNullOrWhiteSpace(refRow.Businessname) ||
+                string.Equals(refRow.Businessname.Trim(), (record.Businessname?.Data ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+            bool regNumMatches = string.IsNullOrWhiteSpace(refRow.Busregnum) ||
+                string.Equals(refRow.Busregnum.Trim(), (record.Busregnum?.Data ?? string.Empty).Trim(), StringComparison.OrdinalIgnoreCase);
+
+            if (nameMatches && regNumMatches)
+            {
+                closed.Add(record);
+            }
+        }
+        return closed;
+    }
+
     (List<IndividualContext> allRecords, List<IndividualContext> duplicatesInd, string correctDateOfBirth, string dobIssues, string matchdata, string newdata, string duplicatescount) REF_MainMatcherTransformerInd_Clean_IND(List<IndividualRef> fromDatabase, List<IndividualContext> _fromExcelFile, bool handleDuplicates = true)
     {
         // Initialize lists to store processed Excel records and duplicates
@@ -3095,20 +3184,28 @@
                         UnlLogInstitutionType = unlExistingProfile?.InstitutionType ?? string.Empty;
                         unlLogPanelView = (_duplicatesInd != null && _duplicatesInd.Count > 0) ? "d-block" : "d-none";
 
+                        // Only persist/route records that actually passed every check.
+                        // mainMatcherTransformer (aka "allRecords" from the matcher)
+                        // includes everything short of exact intra-file duplicates --
+                        // the real CLEAN/UNL split only happens later, per-record, at
+                        // Excel-write time via ISCleaned(). Without this filter, UNL
+                        // records were being saved into the reference DB right
+                        // alongside clean ones through the normal cleaning flow --
+                        // REFERENCE/REGISTER is meant to be the only path that loads
+                        // unchecked records, by deliberate associate action.
+                        var trulyCleanInd = mainMatcherTransformer.Where(r => ISCleaned(r)).ToList();
 
                         if (CleanOnlyOrCleanAndReference == false)
                         {
-                            // Only persist records that actually passed every check.
-                            // mainMatcherTransformer (aka "allRecords" from the matcher)
-                            // includes everything short of exact intra-file duplicates --
-                            // the real CLEAN/UNL split only happens later, per-record, at
-                            // Excel-write time via ISCleaned(). Without this filter, UNL
-                            // records were being saved into the reference DB right
-                            // alongside clean ones through the normal cleaning flow --
-                            // REFERENCE/REGISTER is meant to be the only path that loads
-                            // unchecked records, by deliberate associate action.
-                            var trulyCleanInd = mainMatcherTransformer.Where(r => ISCleaned(r)).ToList();
                             var idChangelog = await DataManagementService.SaveExcelDataToDatabaseInd(trulyCleanInd, filename);
+                        }
+
+                        // Closed-facility repeats: pull them out of the CLEAN-bound list so
+                        // they land on their own sheet instead of CLEAN.
+                        var closedRecordsInd = ExtractClosedFacilitiesInd(trulyCleanInd, RefData);
+                        if (closedRecordsInd.Count > 0)
+                        {
+                            mainMatcherTransformer = mainMatcherTransformer.Except(closedRecordsInd).ToList();
                         }
                         // destinationStream is no longer needed past this point -- all reading/
                         // parsing already happened into the in-memory record lists above.
@@ -3116,7 +3213,7 @@
                         // delete throws "being used by another process" (same root cause already
                         // fixed in the REGISTER flow).
                         destinationStream.Dispose();
-                        byte[] ExcelDataTobeDownloaded = await SaveToExcelAsync(mainMatcherTransformer, _duplicatesInd);
+                        byte[] ExcelDataTobeDownloaded = await SaveToExcelAsync(mainMatcherTransformer, _duplicatesInd, closedRecordsInd);
                         await DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
                         try { File.Delete(FullExcelDataFilePath!); } catch { /* non-fatal, swept later */ }
                         StateHasChanged();
@@ -3203,14 +3300,21 @@
                         matchdata = _matchdata.ToString();
                         newdata = _newdata.ToString();
                         duplicateCount = _duplicateCount.ToString();
+
+                        var trulyCleanBus = mainMatcherTransformer.Where(r => ISCleaned(r)).ToList();
                         if (CleanOnlyOrCleanAndReference == false)
                         {
                             //await DataManagementService.SaveExcelDataToDatabaseBus(ExcelDataRecieved, filename);
-                            var trulyCleanBus = mainMatcherTransformer.Where(r => ISCleaned(r)).ToList();
                             await DataManagementService.SaveExcelDataToDatabaseBus(trulyCleanBus, filename);
                         }
+
+                        var closedRecordsBus = ExtractClosedFacilitiesBus(trulyCleanBus, RefData);
+                        if (closedRecordsBus.Count > 0)
+                        {
+                            mainMatcherTransformer = mainMatcherTransformer.Except(closedRecordsBus).ToList();
+                        }
                         destinationStream.Dispose();
-                        byte[] ExcelDataTobeDownloaded = await SaveToExcelAsync(mainMatcherTransformer, _duplicatesInd);
+                        byte[] ExcelDataTobeDownloaded = await SaveToExcelAsync(mainMatcherTransformer, _duplicatesInd, closedRecordsBus);
                         await DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
                         try { File.Delete(FullExcelDataFilePath!); } catch { /* non-fatal, swept later */ }
                         StateHasChanged();
@@ -4077,7 +4181,7 @@
             }
         }
     }
-    async Task<byte[]> SaveToExcelAsync<T>(List<T> context, List<T> context_duplicate)
+    async Task<byte[]> SaveToExcelAsync<T>(List<T> context, List<T> context_duplicate, List<T>? context_closed = null)
     {
         return await Task.Run(() =>
         {
@@ -4087,30 +4191,33 @@
                 var ws = wb.Worksheets.Add("CLEAN");
                 var wsu = wb.Worksheets.Add("UNL");
                 var wsd = wb.Worksheets.Add("DUPLICATE");
+                var wsc = wb.Worksheets.Add("CLOSED");
+                var closedRows = context_closed ?? new List<T>();
 
                 if (typeof(T) == typeof(BusinessContext))
                 {
-                    WriteHeaders(ws, wsu, wsd, SpreadSheetHeadersData.Business, 159);
-                    WriteData(context.OfType<BusinessContext>().ToList(), context_duplicate.OfType<BusinessContext>().ToList(), ws, wsu, wsd);
+                    WriteHeaders(ws, wsu, wsd, wsc, SpreadSheetHeadersData.Business, 159);
+                    WriteData(context.OfType<BusinessContext>().ToList(), context_duplicate.OfType<BusinessContext>().ToList(), closedRows.OfType<BusinessContext>().ToList(), ws, wsu, wsd, wsc);
                 }
                 else if (typeof(T) == typeof(IndividualContext))
                 {
-                    WriteHeaders(ws, wsu, wsd, SpreadSheetHeadersData.Individual, 179);
+                    WriteHeaders(ws, wsu, wsd, wsc, SpreadSheetHeadersData.Individual, 179);
                     // Add WARNING column header at col 180 for IND sheets only
                     ws.Cell(1, 180).Value  = "--------------- Warnings ---------------";
                     wsu.Cell(1, 180).Value = "--------------- Warnings ---------------";
                     wsd.Cell(1, 180).Value = "--------------- Warnings ---------------";
-                    WriteData(context.OfType<IndividualContext>().ToList(), context_duplicate.OfType<IndividualContext>().ToList(), ws, wsu, wsd);
+                    wsc.Cell(1, 180).Value = "--------------- Warnings ---------------";
+                    WriteData(context.OfType<IndividualContext>().ToList(), context_duplicate.OfType<IndividualContext>().ToList(), closedRows.OfType<IndividualContext>().ToList(), ws, wsu, wsd, wsc);
                 }
                 else if (typeof(T) == typeof(BusinessContextDud))
                 {
-                    WriteHeaders(ws, wsu, wsd, SpreadSheetHeadersData.BusinessDud, 47);
-                    WriteData(context.OfType<BusinessContextDud>().ToList(), context_duplicate.OfType<BusinessContextDud>().ToList(), ws, wsu, wsd);
+                    WriteHeaders(ws, wsu, wsd, wsc, SpreadSheetHeadersData.BusinessDud, 47);
+                    WriteData(context.OfType<BusinessContextDud>().ToList(), context_duplicate.OfType<BusinessContextDud>().ToList(), new List<BusinessContextDud>(), ws, wsu, wsd, wsc);
                 }
                 else if (typeof(T) == typeof(IndividualContextDud))
                 {
-                    WriteHeaders(ws, wsu, wsd, SpreadSheetHeadersData.IndividualDud, 75);
-                    WriteData(context.OfType<IndividualContextDud>().ToList(), context_duplicate.OfType<IndividualContextDud>().ToList(), ws, wsu, wsd);
+                    WriteHeaders(ws, wsu, wsd, wsc, SpreadSheetHeadersData.IndividualDud, 75);
+                    WriteData(context.OfType<IndividualContextDud>().ToList(), context_duplicate.OfType<IndividualContextDud>().ToList(), new List<IndividualContextDud>(), ws, wsu, wsd, wsc);
                 }
 
                 using var stream = new MemoryStream();
@@ -4119,21 +4226,23 @@
             }
         });
     }
-    void WriteHeaders(IXLWorksheet ws, IXLWorksheet wsu, IXLWorksheet wsd, List<string> headers, int errorIndex)
+    void WriteHeaders(IXLWorksheet ws, IXLWorksheet wsu, IXLWorksheet wsd, IXLWorksheet wsc, List<string> headers, int errorIndex)
     {
         for (int i = 0; i < headers.Count; i++)
         {
             ws.Cell(1, i + 1).Value = headers[i];
             wsu.Cell(1, i + 1).Value = headers[i];
             wsd.Cell(1, i + 1).Value = headers[i];
+            wsc.Cell(1, i + 1).Value = headers[i];
         }
         wsu.Cell(1, errorIndex).Value = "--------------- Errors ---------------";
     }
-    void WriteData<T>(List<T> rows, List<T> dup_rows, IXLWorksheet ws, IXLWorksheet wsu, IXLWorksheet wsd) where T : class
+    void WriteData<T>(List<T> rows, List<T> dup_rows, List<T> closed_rows, IXLWorksheet ws, IXLWorksheet wsu, IXLWorksheet wsd, IXLWorksheet wsc) where T : class
     {
         int correctDataCellIndex = 2;
         int correctCellDuplicate = 2;
         int wrongDataCellIndex = 2;
+        int closedCellIndex = 2;
         bool iSCleaned = false;
 
         foreach (var row in rows)
@@ -4152,9 +4261,18 @@
         {
             WriteRow_dup(wsd, dup_row, ref correctCellDuplicate);
         }
+        // Closed-facility repeats: already confirmed clean and discrepancy-free by
+        // ExtractClosedFacilitiesInd/Bus before ever reaching here, so this writes
+        // directly rather than re-running ISCleaned.
+        bool closedFlag = true;
+        foreach (var closed_row in closed_rows)
+        {
+            WriteRow(wsc, closed_row, ref closedFlag, ref closedCellIndex);
+        }
         ws.Columns().AdjustToContents();
         wsu.Columns().AdjustToContents();
         wsd.Columns().AdjustToContents();
+        wsc.Columns().AdjustToContents();
     }
     void WriteRow_dup<T>(IXLWorksheet ws, T dup_rows, ref int rowIndex)
     {
