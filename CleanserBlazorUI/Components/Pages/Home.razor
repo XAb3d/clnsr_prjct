@@ -499,9 +499,10 @@
                         StateHasChanged();
                         var RefData = await DataManagementService.GETReferenceData_IND(filename);
                         var (mainMatcherTransformer, _correctDateOfBirth, _dobIssues, _matchdata) = REF_MainMatcherTransformer_IND(RefData, ExcelDataRecieved);
+                        destinationStream.Dispose();
                         byte[] ExcelDataTobeDownloaded = await REF_SaveToExcelAsync(mainMatcherTransformer);
                         await REF_DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
-                        File.Delete(FullExcelDataFilePath!);
+                        try { File.Delete(FullExcelDataFilePath!); } catch { /* non-fatal, swept later */ }
                         AlertSeverityVisible = "d-none";
                     }
                 }
@@ -571,9 +572,10 @@
                         StateHasChanged();
                         var RefData = await DataManagementService.GETReferenceData_BUS(filename);
                         var (mainMatcherTransformer, _correctDateOfBirth, _dobIssues, _matchdata) = REF_MainMatcherTransformer_BUS(RefData, ExcelDataRecieved);
+                        destinationStream.Dispose();
                         byte[] ExcelDataTobeDownloaded = await REF_SaveToExcelAsync(mainMatcherTransformer);
                         await REF_DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
-                        File.Delete(FullExcelDataFilePath!);
+                        try { File.Delete(FullExcelDataFilePath!); } catch { /* non-fatal, swept later */ }
                         AlertSeverityVisible = "d-none";
                     }
                 }
@@ -3108,9 +3110,15 @@
                             var trulyCleanInd = mainMatcherTransformer.Where(r => ISCleaned(r)).ToList();
                             var idChangelog = await DataManagementService.SaveExcelDataToDatabaseInd(trulyCleanInd, filename);
                         }
+                        // destinationStream is no longer needed past this point -- all reading/
+                        // parsing already happened into the in-memory record lists above.
+                        // Dispose it before anything tries to touch FullExcelDataFilePath, or the
+                        // delete throws "being used by another process" (same root cause already
+                        // fixed in the REGISTER flow).
+                        destinationStream.Dispose();
                         byte[] ExcelDataTobeDownloaded = await SaveToExcelAsync(mainMatcherTransformer, _duplicatesInd);
                         await DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
-                        File.Delete(FullExcelDataFilePath!);
+                        try { File.Delete(FullExcelDataFilePath!); } catch { /* non-fatal, swept later */ }
                         StateHasChanged();
                         ExcelDataRecieved.Clear();
                         ExcelDataRecieved = null;
@@ -3201,9 +3209,10 @@
                             var trulyCleanBus = mainMatcherTransformer.Where(r => ISCleaned(r)).ToList();
                             await DataManagementService.SaveExcelDataToDatabaseBus(trulyCleanBus, filename);
                         }
+                        destinationStream.Dispose();
                         byte[] ExcelDataTobeDownloaded = await SaveToExcelAsync(mainMatcherTransformer, _duplicatesInd);
                         await DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
-                        File.Delete(FullExcelDataFilePath!);
+                        try { File.Delete(FullExcelDataFilePath!); } catch { /* non-fatal, swept later */ }
                         StateHasChanged();
                         ExcelDataRecieved.Clear();
                         ExcelDataRecieved = null;
@@ -3257,9 +3266,10 @@
                         AlertSeverityMessage = "Success: The uploaded spreadsheet contains the expected headers";
                         AlertSeverity = MudBlazor.Severity.Success;
                         AlertSeverityVisible = "d-block";
+                        destinationStream.Dispose();
                         byte[] ExcelDataTobeDownloaded = await SaveToExcelAsync(ExcelDataRecieved, new List<IndividualContextDud>());
                         await DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
-                        File.Delete(FullExcelDataFilePath!);
+                        try { File.Delete(FullExcelDataFilePath!); } catch { /* non-fatal, swept later */ }
                         StateHasChanged();
                         ExcelDataRecieved.Clear();
                         ExcelDataRecieved = null;
@@ -3323,9 +3333,10 @@
                         // {
                         //     await DataManagementService.SaveExcelDataToDatabaseBus(ExcelDataRecieved, filename);
                         // }
+                        destinationStream.Dispose();
                         byte[] ExcelDataTobeDownloaded = await SaveToExcelAsync(ExcelDataRecieved, new List<BusinessContextDud>());
                         await DownloadExcelDataStream(ExcelDataTobeDownloaded, FullExcelDataFilePath);
-                        File.Delete(FullExcelDataFilePath!);
+                        try { File.Delete(FullExcelDataFilePath!); } catch { /* non-fatal, swept later */ }
                         StateHasChanged();
                         ExcelDataRecieved.Clear();
                         ExcelDataRecieved = null;
