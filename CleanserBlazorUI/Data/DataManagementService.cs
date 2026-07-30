@@ -42,6 +42,16 @@ public class DataManagementService
     public async Task<List<(string AccNum, string CustomerID, string DisbDate, string FieldAdded)>>
         SaveExcelDataToDatabaseInd(IEnumerable<DBIndividualContext> dataFromExcel, string fileShortName)
     {
+        // ApplicationDbContext is registered Scoped, which in Blazor Server means
+        // one instance per browser circuit -- NOT per upload. Without clearing,
+        // entities tracked from an earlier upload in the same session can still be
+        // tracked here, and EF Core throws when a "new" query tries to track an
+        // entity with a key that's already tracked by a different, stale instance.
+        // This was almost certainly the cause of a later upload in the same
+        // session silently producing no output (previously hidden by an empty
+        // catch block, now fixed alongside this).
+        _context.ChangeTracker.Clear();
+
         var subscriber = await GetFileShortCodeFromFileName(fileShortName);
         var now        = DateTime.Now;
         var changelog  = new List<(string, string, string, string)>();
@@ -160,6 +170,9 @@ public class DataManagementService
     // ── BUS Upsert ────────────────────────────────────────────────────────────
     public async Task SaveExcelDataToDatabaseBus(IEnumerable<DBBusinessContext> dataFromExcel, string fileShortName)
     {
+        // Same reasoning as the IND overload above -- see that comment.
+        _context.ChangeTracker.Clear();
+
         var subscriber = await GetFileShortCodeFromFileName(fileShortName);
         var now        = DateTime.Now;
 
