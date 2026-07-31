@@ -103,6 +103,19 @@ regression test alongside the fix).
 
 ---
 
+## Backlog / Future Work
+
+Not scheduled yet — noted here so it isn't lost, not because it's next.
+
+- **Unloadable Log should source from the UNL sheet, not the DUPLICATE sheet.**
+  The current Unloadable Log feature (`UnloadableLogService`) is wired to the
+  duplicates list (`_duplicatesInd`), but the UNL sheet is what actually holds
+  the genuinely-unloadable records — duplicates are a different category.
+  Flagged directly by the person doing the day-to-day work, deferred
+  intentionally rather than rushed alongside other in-flight fixes.
+
+---
+
 ## Earlier history
 
 Changes prior to 2026-07-28 are tracked in git history and

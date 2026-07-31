@@ -1877,7 +1877,25 @@
                 .Distinct()
                 .Count();
 
-            if (distinctCustomerIDs > 1 || distinctTinums > 1)
+            // Different CustomerIDs sharing the same Busregnum can legitimately
+            // happen -- the same business registered separately per branch,
+            // each with its own CustomerID. Registration date isn't reliable
+            // enough to verify against (known inconsistencies), so fall back to
+            // an exact Businessname match instead: same name across the group
+            // -> legitimate, don't block. Different names, or no names to check
+            // at all -> can't confirm it's the same business, stay conservative.
+            bool customerIdConflict = distinctCustomerIDs > 1;
+            if (customerIdConflict)
+            {
+                var distinctBusinessNames = grp
+                    .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
+                    .Select(r => (r.Businessname.Data ?? string.Empty).Trim().ToUpperInvariant())
+                    .Distinct()
+                    .Count();
+                customerIdConflict = distinctBusinessNames != 1;
+            }
+
+            if (customerIdConflict || distinctTinums > 1)
             {
                 foreach (var rec in grp)
                     rec.CustomerIDBusregnumTinumStatus = "E";
@@ -2522,24 +2540,43 @@
                 continue;
             }
 
-            bool nameConflict = false; bool misspell = false;
+            bool nameConflict = false; bool misspellBlocking = false; bool misspellWarning = false;
             for (int i = 0; i < records.Count && !nameConflict; i++)
                 for (int j = i + 1; j < records.Count && !nameConflict; j++)
                 {
-                    var (matches, _, isSame) = CompareNameTokens(
+                    var (matches, maxTokens, isSame) = CompareNameTokens(
                         records[i].Surname?.Data ?? string.Empty,
                         records[i].FirstName?.Data ?? string.Empty,
                         records[i].MiddleNames?.Data ?? string.Empty,
                         records[j].Surname?.Data ?? string.Empty,
                         records[j].FirstName?.Data ?? string.Empty,
                         records[j].MiddleNames?.Data ?? string.Empty);
-                    if (!isSame) { nameConflict = true; misspell = matches > 0; }
+                    if (!isSame)
+                    {
+                        // Low confidence: one token or none in common -- still a
+                        // blocking conflict, same as before.
+                        nameConflict = true;
+                        misspellBlocking = matches > 0;
+                    }
+                    else if (matches < maxTokens)
+                    {
+                        // High confidence it's the same person (enough tokens
+                        // matched to pass), but not a perfect match -- one token
+                        // differs, e.g. "KOFL" vs "KOFI". Worth flagging so it
+                        // doesn't pass through completely silently, but not
+                        // worth blocking over.
+                        misspellWarning = true;
+                    }
                 }
 
             if (nameConflict)
             {
-                string flag = misspell ? "E:MISSPELL" : "E";
+                string flag = misspellBlocking ? "E:MISSPELL" : "E";
                 foreach (var r in records) r.SameCustomerIDDifferentName = flag;
+            }
+            else if (misspellWarning)
+            {
+                foreach (var r in records) r.SameCustomerIDDifferentName = "W:MISSPELL";
             }
         }
 
@@ -5428,6 +5465,15 @@
                         $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS");
                 }
 
+                // Near-match name warning: same CustomerID, tokens matched well enough to
+                // pass (isSame), but not a perfect match -- e.g. "KOFL" vs "KOFI". Not
+                // blocking, but worth a note rather than passing through silently.
+                if (!string.IsNullOrWhiteSpace(individualRow.SameCustomerIDDifferentName) &&
+                    individualRow.SameCustomerIDDifferentName.StartsWith("W"))
+                {
+                    warningParts.Add("POSSIBLE MISSPELLING — NAME NEARLY MATCHES PRIOR RECORD FOR THIS CUSTOMER ID");
+                }
+
                 // Reference name trust note (set by matcher or validation pass)
                 if (!string.IsNullOrWhiteSpace(individualRow.ReferenceNameTrustNote) &&
                     !individualRow.ReferenceNameTrustNote.StartsWith("POSSIBLE DUPLICATE"))
@@ -6818,7 +6864,8 @@
             }
 
             // #14 — Same CustomerID linked to different names
-            if (!string.IsNullOrWhiteSpace(ic.SameCustomerIDDifferentName))
+            if (!string.IsNullOrWhiteSpace(ic.SameCustomerIDDifferentName) &&
+                ic.SameCustomerIDDifferentName.StartsWith("E"))
             {
                 bool misspell14 = ic.SameCustomerIDDifferentName.Contains("MISSPELL");
                 string msg = misspell14
