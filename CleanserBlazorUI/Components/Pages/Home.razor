@@ -1832,6 +1832,14 @@
         if (list == null)
             throw new ArgumentNullException(nameof(list));
 
+        // Trim + case-fold before comparing Busregnum/Tinum -- these are compared
+        // as plain strings, so any invisible whitespace or case difference
+        // between two otherwise-identical values (e.g. from how Excel stored a
+        // cell) would make them count as "different" and force a false conflict,
+        // exactly as reported: a Tinum that looked identical across a group was
+        // still triggering distinctTinums > 1 because it was never normalized.
+        string NormReg(string? v) => (v ?? string.Empty).Trim().ToUpperInvariant();
+
         // 1) Group by CustomerID and check for conflicting Busregnum or Tinum
         var customerGroups = list
             .Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
@@ -1840,14 +1848,14 @@
         foreach (var grp in customerGroups)
         {
             var distinctBusregnums = grp
-                .Where(r => r.Busregnum != null && !string.IsNullOrEmpty(r.Busregnum.Data))
-                .Select(r => r.Busregnum.Data)
+                .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
+                .Select(r => NormReg(r.Busregnum.Data))
                 .Distinct()
                 .Count();
 
             var distinctTinums = grp
-                .Where(r => r.Tinum != null && !string.IsNullOrEmpty(r.Tinum.Data))
-                .Select(r => r.Tinum.Data)
+                .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
+                .Select(r => NormReg(r.Tinum.Data))
                 .Distinct()
                 .Count();
 
@@ -1860,8 +1868,8 @@
 
         // 2) Group by Busregnum and check for conflicting CustomerID or Tinum
         var busregGroups = list
-            .Where(r => r.Busregnum != null && !string.IsNullOrEmpty(r.Busregnum.Data))
-            .GroupBy(r => r.Busregnum.Data);
+            .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
+            .GroupBy(r => NormReg(r.Busregnum.Data));
 
         foreach (var grp in busregGroups)
         {
@@ -1872,8 +1880,8 @@
                 .Count();
 
             var distinctTinums = grp
-                .Where(r => r.Tinum != null && !string.IsNullOrEmpty(r.Tinum.Data))
-                .Select(r => r.Tinum.Data)
+                .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
+                .Select(r => NormReg(r.Tinum.Data))
                 .Distinct()
                 .Count();
 
@@ -1889,7 +1897,7 @@
             {
                 var distinctBusinessNames = grp
                     .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
-                    .Select(r => (r.Businessname.Data ?? string.Empty).Trim().ToUpperInvariant())
+                    .Select(r => NormReg(r.Businessname.Data))
                     .Distinct()
                     .Count();
                 customerIdConflict = distinctBusinessNames != 1;
@@ -1904,8 +1912,8 @@
 
         // 3) Group by Tinum and check for conflicting CustomerID or Busregnum
         var tinumGroups = list
-            .Where(r => r.Tinum != null && !string.IsNullOrEmpty(r.Tinum.Data))
-            .GroupBy(r => r.Tinum.Data);
+            .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
+            .GroupBy(r => NormReg(r.Tinum.Data));
 
         foreach (var grp in tinumGroups)
         {
@@ -1916,12 +1924,25 @@
                 .Count();
 
             var distinctBusregnums = grp
-                .Where(r => r.Busregnum != null && !string.IsNullOrEmpty(r.Busregnum.Data))
-                .Select(r => r.Busregnum.Data)
+                .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
+                .Select(r => NormReg(r.Busregnum.Data))
                 .Distinct()
                 .Count();
 
-            if (distinctCustomerIDs > 1 || distinctBusregnums > 1)
+            // Same reasoning as section 2 -- same Tinum, different CustomerIDs,
+            // can legitimately be the same business registered per branch.
+            bool customerIdConflict = distinctCustomerIDs > 1;
+            if (customerIdConflict)
+            {
+                var distinctBusinessNames = grp
+                    .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
+                    .Select(r => NormReg(r.Businessname.Data))
+                    .Distinct()
+                    .Count();
+                customerIdConflict = distinctBusinessNames != 1;
+            }
+
+            if (customerIdConflict || distinctBusregnums > 1)
             {
                 foreach (var rec in grp)
                     rec.CustomerIDBusregnumTinumStatus = "E";
