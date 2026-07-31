@@ -1832,6 +1832,14 @@
         if (list == null)
             throw new ArgumentNullException(nameof(list));
 
+        // Trim + case-fold before comparing Busregnum/Tinum -- these are compared
+        // as plain strings, so any invisible whitespace or case difference
+        // between two otherwise-identical values (e.g. from how Excel stored a
+        // cell) would make them count as "different" and force a false conflict,
+        // exactly as reported: a Tinum that looked identical across a group was
+        // still triggering distinctTinums > 1 because it was never normalized.
+        string NormReg(string? v) => (v ?? string.Empty).Trim().ToUpperInvariant();
+
         // 1) Group by CustomerID and check for conflicting Busregnum or Tinum
         var customerGroups = list
             .Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
@@ -1840,14 +1848,14 @@
         foreach (var grp in customerGroups)
         {
             var distinctBusregnums = grp
-                .Where(r => r.Busregnum != null && !string.IsNullOrEmpty(r.Busregnum.Data))
-                .Select(r => r.Busregnum.Data)
+                .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
+                .Select(r => NormReg(r.Busregnum.Data))
                 .Distinct()
                 .Count();
 
             var distinctTinums = grp
-                .Where(r => r.Tinum != null && !string.IsNullOrEmpty(r.Tinum.Data))
-                .Select(r => r.Tinum.Data)
+                .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
+                .Select(r => NormReg(r.Tinum.Data))
                 .Distinct()
                 .Count();
 
@@ -1860,8 +1868,8 @@
 
         // 2) Group by Busregnum and check for conflicting CustomerID or Tinum
         var busregGroups = list
-            .Where(r => r.Busregnum != null && !string.IsNullOrEmpty(r.Busregnum.Data))
-            .GroupBy(r => r.Busregnum.Data);
+            .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
+            .GroupBy(r => NormReg(r.Busregnum.Data));
 
         foreach (var grp in busregGroups)
         {
@@ -1872,12 +1880,30 @@
                 .Count();
 
             var distinctTinums = grp
-                .Where(r => r.Tinum != null && !string.IsNullOrEmpty(r.Tinum.Data))
-                .Select(r => r.Tinum.Data)
+                .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
+                .Select(r => NormReg(r.Tinum.Data))
                 .Distinct()
                 .Count();
 
-            if (distinctCustomerIDs > 1 || distinctTinums > 1)
+            // Different CustomerIDs sharing the same Busregnum can legitimately
+            // happen -- the same business registered separately per branch,
+            // each with its own CustomerID. Registration date isn't reliable
+            // enough to verify against (known inconsistencies), so fall back to
+            // an exact Businessname match instead: same name across the group
+            // -> legitimate, don't block. Different names, or no names to check
+            // at all -> can't confirm it's the same business, stay conservative.
+            bool customerIdConflict = distinctCustomerIDs > 1;
+            if (customerIdConflict)
+            {
+                var distinctBusinessNames = grp
+                    .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
+                    .Select(r => NormReg(r.Businessname.Data))
+                    .Distinct()
+                    .Count();
+                customerIdConflict = distinctBusinessNames != 1;
+            }
+
+            if (customerIdConflict || distinctTinums > 1)
             {
                 foreach (var rec in grp)
                     rec.CustomerIDBusregnumTinumStatus = "E";
@@ -1886,8 +1912,8 @@
 
         // 3) Group by Tinum and check for conflicting CustomerID or Busregnum
         var tinumGroups = list
-            .Where(r => r.Tinum != null && !string.IsNullOrEmpty(r.Tinum.Data))
-            .GroupBy(r => r.Tinum.Data);
+            .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
+            .GroupBy(r => NormReg(r.Tinum.Data));
 
         foreach (var grp in tinumGroups)
         {
@@ -1898,12 +1924,25 @@
                 .Count();
 
             var distinctBusregnums = grp
-                .Where(r => r.Busregnum != null && !string.IsNullOrEmpty(r.Busregnum.Data))
-                .Select(r => r.Busregnum.Data)
+                .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
+                .Select(r => NormReg(r.Busregnum.Data))
                 .Distinct()
                 .Count();
 
-            if (distinctCustomerIDs > 1 || distinctBusregnums > 1)
+            // Same reasoning as section 2 -- same Tinum, different CustomerIDs,
+            // can legitimately be the same business registered per branch.
+            bool customerIdConflict = distinctCustomerIDs > 1;
+            if (customerIdConflict)
+            {
+                var distinctBusinessNames = grp
+                    .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
+                    .Select(r => NormReg(r.Businessname.Data))
+                    .Distinct()
+                    .Count();
+                customerIdConflict = distinctBusinessNames != 1;
+            }
+
+            if (customerIdConflict || distinctBusregnums > 1)
             {
                 foreach (var rec in grp)
                     rec.CustomerIDBusregnumTinumStatus = "E";
@@ -2522,24 +2561,43 @@
                 continue;
             }
 
-            bool nameConflict = false; bool misspell = false;
+            bool nameConflict = false; bool misspellBlocking = false; bool misspellWarning = false;
             for (int i = 0; i < records.Count && !nameConflict; i++)
                 for (int j = i + 1; j < records.Count && !nameConflict; j++)
                 {
-                    var (matches, _, isSame) = CompareNameTokens(
+                    var (matches, maxTokens, isSame) = CompareNameTokens(
                         records[i].Surname?.Data ?? string.Empty,
                         records[i].FirstName?.Data ?? string.Empty,
                         records[i].MiddleNames?.Data ?? string.Empty,
                         records[j].Surname?.Data ?? string.Empty,
                         records[j].FirstName?.Data ?? string.Empty,
                         records[j].MiddleNames?.Data ?? string.Empty);
-                    if (!isSame) { nameConflict = true; misspell = matches > 0; }
+                    if (!isSame)
+                    {
+                        // Low confidence: one token or none in common -- still a
+                        // blocking conflict, same as before.
+                        nameConflict = true;
+                        misspellBlocking = matches > 0;
+                    }
+                    else if (matches < maxTokens)
+                    {
+                        // High confidence it's the same person (enough tokens
+                        // matched to pass), but not a perfect match -- one token
+                        // differs, e.g. "KOFL" vs "KOFI". Worth flagging so it
+                        // doesn't pass through completely silently, but not
+                        // worth blocking over.
+                        misspellWarning = true;
+                    }
                 }
 
             if (nameConflict)
             {
-                string flag = misspell ? "E:MISSPELL" : "E";
+                string flag = misspellBlocking ? "E:MISSPELL" : "E";
                 foreach (var r in records) r.SameCustomerIDDifferentName = flag;
+            }
+            else if (misspellWarning)
+            {
+                foreach (var r in records) r.SameCustomerIDDifferentName = "W:MISSPELL";
             }
         }
 
@@ -5428,6 +5486,15 @@
                         $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS");
                 }
 
+                // Near-match name warning: same CustomerID, tokens matched well enough to
+                // pass (isSame), but not a perfect match -- e.g. "KOFL" vs "KOFI". Not
+                // blocking, but worth a note rather than passing through silently.
+                if (!string.IsNullOrWhiteSpace(individualRow.SameCustomerIDDifferentName) &&
+                    individualRow.SameCustomerIDDifferentName.StartsWith("W"))
+                {
+                    warningParts.Add("POSSIBLE MISSPELLING — NAME NEARLY MATCHES PRIOR RECORD FOR THIS CUSTOMER ID");
+                }
+
                 // Reference name trust note (set by matcher or validation pass)
                 if (!string.IsNullOrWhiteSpace(individualRow.ReferenceNameTrustNote) &&
                     !individualRow.ReferenceNameTrustNote.StartsWith("POSSIBLE DUPLICATE"))
@@ -6818,7 +6885,8 @@
             }
 
             // #14 — Same CustomerID linked to different names
-            if (!string.IsNullOrWhiteSpace(ic.SameCustomerIDDifferentName))
+            if (!string.IsNullOrWhiteSpace(ic.SameCustomerIDDifferentName) &&
+                ic.SameCustomerIDDifferentName.StartsWith("E"))
             {
                 bool misspell14 = ic.SameCustomerIDDifferentName.Contains("MISSPELL");
                 string msg = misspell14
