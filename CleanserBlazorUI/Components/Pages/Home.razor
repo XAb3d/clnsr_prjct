@@ -2987,7 +2987,59 @@
         return virtualRecords;
     }
 
-    (List<IndividualContext> allRecords, List<IndividualContext> duplicatesInd, string correctDateOfBirth, string dobIssues, string matchdata, string newdata, string duplicatescount) REF_MainMatcherTransformerInd_Clean_IND(List<IndividualRef> fromDatabase, List<IndividualContext> _fromExcelFile, bool handleDuplicates = true)
+    // ── Phase 4 (BUS): same technique as the IND version above ──────────────
+    // One virtual BusinessContext per CustomerID, built from whichever
+    // BusinessRef row for that customer was most recently updated. Injected
+    // into the same list CheckForChangesInCustomerIDBusregnumTinum already
+    // processes -- its existing byCustomerID grouping (section 1) naturally
+    // compares a real incoming record's Businessname/Busregnum/Tinum against
+    // its own reference history the same way it already compares two records
+    // within one file. Caller must remove these again via the returned
+    // virtualRecords list (e.g. .Except()) before anything else sees them.
+    List<BusinessContext> BuildReferenceVirtualRecordsBus(List<BusinessContext> incoming, List<BusinessRef> fromDatabase, out Dictionary<string, string> previousNameByCustomer)
+    {
+        var virtualRecords = new List<BusinessContext>();
+        previousNameByCustomer = new Dictionary<string, string>();
+        if (incoming == null || incoming.Count == 0 || fromDatabase == null || fromDatabase.Count == 0)
+            return virtualRecords;
+
+        var customerKeys = incoming
+            .Select(r => NormalizeCustomerId(r.CustomerID?.Data))
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .ToHashSet();
+
+        var refByCustomer = fromDatabase
+            .Where(r => customerKeys.Contains(NormalizeCustomerId(r.CustomerID)))
+            .GroupBy(r => NormalizeCustomerId(r.CustomerID));
+
+        foreach (var group in refByCustomer)
+        {
+            var canonical = group.OrderByDescending(r => r.LastUpdatedDate).First();
+
+            CellDataAndStatus Cell(string? v)
+            {
+                var value = v ?? string.Empty;
+                return new CellDataAndStatus(value) { Data = value };
+            }
+
+            virtualRecords.Add(new BusinessContext
+            {
+                CustomerID       = Cell(canonical.CustomerID),
+                Facilityaccnum   = Cell(canonical.CreditFacilityAccNum),
+                DisbursementDate = Cell(canonical.DisbursementDate),
+                Businessname     = Cell(canonical.Businessname),
+                Busregnum        = Cell(canonical.Busregnum),
+                Tinum            = Cell(canonical.Tinum),
+            });
+
+            if (!string.IsNullOrWhiteSpace(canonical.Businessname))
+            {
+                previousNameByCustomer[group.Key] = canonical.Businessname.Trim();
+            }
+        }
+
+        return virtualRecords;
+    }
     {
         // Initialize lists to store processed Excel records and duplicates
         List<IndividualContext> processedExcelRecords = new List<IndividualContext>();
@@ -3444,7 +3496,15 @@
                         var RefData = await DataManagementService.GETReferenceData_BUS(filename);
                         isSubscriber_X_or_Y = await DataManagementService.GetSubscribeX_or_Y(filename);
                         var (mainMatcherTransformer, _duplicatesInd, _correctDateOfBirth, _dobIssues, _matchdata, _newdata, _duplicateCount) = REF_MainMatcherTransformerInd_Clean_BUS(RefData, ExcelDataRecieved);
-                        var mainMatcherTransformer_temp = CheckForChangesInCustomerIDBusregnumTinum(mainMatcherTransformer);
+                        // Fold reference in as virtual records so Businessname/Busregnum/Tinum
+                        // conflicts against history get caught by the same cross-record logic
+                        // that already catches conflicts within this file (Phase 4 for BUS,
+                        // mirroring the IND version) -- then discard the virtual records again
+                        // before anything else sees them.
+                        var referenceVirtualsBus = BuildReferenceVirtualRecordsBus(mainMatcherTransformer, RefData, out _);
+                        var forCrossChecksBus = mainMatcherTransformer.Concat(referenceVirtualsBus).ToList();
+                        forCrossChecksBus = CheckForChangesInCustomerIDBusregnumTinum(forCrossChecksBus);
+                        var mainMatcherTransformer_temp = forCrossChecksBus.Except(referenceVirtualsBus).ToList();
                         mainMatcherTransformer = mainMatcherTransformer_temp;
                         correctDateOfBirth = _correctDateOfBirth.ToString();
                         dobIssues = _dobIssues.ToString();

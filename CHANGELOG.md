@@ -107,6 +107,25 @@ regression test alongside the fix).
 
 Not scheduled yet — noted here so it isn't lost, not because it's next.
 
+- **Full UI redesign.** Parked deliberately for a later version, once the core
+  logic work (Phases 1-6, this file's main body) is settled. Direction agreed
+  so far: stay on Blazor Server + MudBlazor rather than switching stacks (the
+  app's core work — Excel parsing, EF Core, direct DB/file access — is
+  inherently server-side; a JS frontend would mean building and maintaining a
+  full API layer on top of everything, for a UI reskin). Full redesign in
+  scope (not just the daily-use screens), theme explicitly NOT XDS branding —
+  to be specified later. Plan when we get there: agree on information
+  architecture first, extract business logic out of `Home.razor` into
+  services (valuable independent of the visual redesign too), then rebuild
+  screen by screen with a proper design system.
+
+- **Offline, whole-codebase understanding agent/tool.** Wanted: something
+  that understands the entire codebase (not just what fits in a token-limited
+  context window) and can point to exactly where in the code something lives,
+  what it means, and how a change would ripple through it — running locally/
+  offline, not a cloud/token-metered service. Noted for further discussion,
+  not scoped yet.
+
 - **Unloadable Log should source from the UNL sheet, not the DUPLICATE sheet.**
   The current Unloadable Log feature (`UnloadableLogService`) is wired to the
   duplicates list (`_duplicatesInd`), but the UNL sheet is what actually holds

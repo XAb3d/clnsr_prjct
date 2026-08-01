@@ -211,14 +211,16 @@ public class DataManagementService
                 if (!string.IsNullOrWhiteSpace(item.DateOfBirth))
                     dbRow.DateOfBirth = item.DateOfBirth;
 
-                string? businessName = dbRow.Businessname, busRegNum = dbRow.Busregnum;
+                string? businessName = dbRow.Businessname, busRegNum = dbRow.Busregnum, tinNum = dbRow.Tinum;
                 bool changed = false;
                 changed |= EnrichField(ref businessName, item.Businessname, "Businessname", key.Item1, key.Item2, key.Item3, busChangelog);
                 changed |= EnrichField(ref busRegNum,     item.Busregnum,   "Busregnum",     key.Item1, key.Item2, key.Item3, busChangelog);
+                changed |= EnrichField(ref tinNum,        item.Tinum,       "Tinum",         key.Item1, key.Item2, key.Item3, busChangelog);
                 if (changed)
                 {
                     dbRow.Businessname = businessName;
                     dbRow.Busregnum = busRegNum;
+                    dbRow.Tinum = tinNum;
                     dbRow.LastUpdatedDate = now;
                     toUpdate.Add(dbRow);
                 }
@@ -243,6 +245,7 @@ public class DataManagementService
                     DateOfBirth          = item.DateOfBirth      ?? string.Empty,
                     Businessname         = item.Businessname     ?? string.Empty,
                     Busregnum            = item.Busregnum        ?? string.Empty,
+                    Tinum                = item.Tinum            ?? string.Empty,
                     FacilityStatusCode   = item.FacilityStatusCode ?? string.Empty,
                     CurrenVersion        = 1,
                     CreatedDate          = now,
@@ -270,6 +273,7 @@ public class DataManagementService
             DateOfBirth      = r.DateOfBirth            ?? string.Empty,
             Businessname       = r.Businessname?.Data       ?? string.Empty,
             Busregnum          = r.Busregnum?.Data          ?? string.Empty,
+            Tinum              = r.Tinum?.Data              ?? string.Empty,
             FacilityStatusCode = r.FacilityStatusCode?.Data ?? string.Empty,
         });
         await SaveExcelDataToDatabaseBus(mapped, fileShortName);
