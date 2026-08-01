@@ -1751,8 +1751,11 @@
         }
         return (recordFromClient, "N/A", "N/A", matchdata.ToString());
     }
-    (List<BusinessContext> allRecords, List<BusinessContext> duplicatesInd, string correctDateOfBirth, string dobIssues, string matchdata, string newdata, string duplicatescount) REF_MainMatcherTransformerInd_Clean_BUS(List<BusinessRef> fromDatabase, List<BusinessContext> fromExcelFile, bool handleDuplicates = true)
+    (List<BusinessContext> allRecords, List<BusinessContext> duplicatesInd, string correctDateOfBirth, string dobIssues, string matchdata, string newdata, string duplicatescount) REF_MainMatcherTransformerInd_Clean_BUS(List<BusinessRef> fromDatabase, List<BusinessContext> fromExcelFileRaw, bool handleDuplicates = true)
     {
+        // Flag same-submission overdraft redraws before dedup, mirroring the IND matcher.
+        var fromExcelFile = AssignDuplicateDoBIssuesBus(fromExcelFileRaw);
+
         List<BusinessContext> processedExcelRecords = new();
         List<BusinessContext> duplicatesList = new();
 
@@ -1779,11 +1782,21 @@
             processedExcelRecords = fromExcelFile.ToList();
         }
 
-        var databaseDict = new Dictionary<(string, string), BusinessRef>();
+        // A facility can legitimately have MULTIPLE historical rows (one per
+        // DisbursementDate ever seen -- this is the whole point for overdrafts).
+        // Keep the full list per key instead of collapsing to the last-seen row,
+        // or history for earlier draws silently disappears. Same fix already
+        // applied to the IND matcher.
+        var databaseDict = new Dictionary<(string, string), List<BusinessRef>>();
         foreach (var dbRecord in fromDatabase)
         {
             var key = (NormalizeAccountNumber(dbRecord.CreditFacilityAccNum), NormalizeCustomerId(dbRecord.CustomerID));
-            databaseDict[key] = dbRecord;
+            if (!databaseDict.TryGetValue(key, out var list))
+            {
+                list = new List<BusinessRef>();
+                databaseDict[key] = list;
+            }
+            list.Add(dbRecord);
         }
 
         int __correctDateOfBirth = 0;
@@ -1800,11 +1813,23 @@
 
             var key = (creditFacilityAccNum, customerID);
 
-            if (databaseDict.TryGetValue(key, out var dbRecord))
+            if (databaseDict.TryGetValue(key, out var dbRecords) && dbRecords.Count > 0)
             {
                 var excelDob = excelRecord.DateOfBirth;
                 __matchdata++;
-                if (dbRecord.DisbursementDate != disbursementDate)
+
+                // Overdraft facilities legitimately redraw on new dates -- exempt
+                // from the disbursement-date-mismatch rule, same exemption
+                // already applied to the IND matcher.
+                bool isOverdraft = (excelRecord.CreditFacilityType?.Data ?? string.Empty)
+                    .Trim().ToUpperInvariant() == "V";
+
+                var dbRecord = dbRecords.FirstOrDefault(r => r.DisbursementDate == disbursementDate)
+                                ?? dbRecords[0];
+
+                bool dateOnFile = dbRecords.Any(r => r.DisbursementDate == disbursementDate);
+
+                if (!dateOnFile && !isOverdraft)
                 {
                     excelRecord.DisburStatus = " THE DISBURSEMENT DATE DOES NOT MATCH THE PREVIOUS SUBMISSION ";
                     __burscount++;
@@ -3259,6 +3284,44 @@
 
         // Return updated list
         return individuals;
+    }
+
+    // ── BUS equivalent, disbursement-date only ───────────────────────────────
+    // BusinessContext.DateOfBirth is a plain string (not a validated
+    // CellDataAndStatus field, unlike Individual) -- there's no meaningful
+    // "duplicate DOB" concept for a business, so this only ports the
+    // disbursement-date half of AssignDuplicateDoBIssues, which is the part
+    // that actually matters here: an overdraft facility legitimately redrawn
+    // more than once in the same submission shouldn't be flagged.
+    List<BusinessContext> AssignDuplicateDoBIssuesBus(List<BusinessContext> businesses)
+    {
+        var groups = businesses.GroupBy(b => new
+        {
+            Credit = NormalizeAccountNumber(b.Facilityaccnum?.Data),
+            Customer = NormalizeCustomerId(b.CustomerID?.Data),
+        });
+
+        foreach (var group in groups)
+        {
+            if (group.Count() > 1)
+            {
+                var disValues = group.Select(b => b.DisbursementDate?.Data);
+                if (disValues.Distinct().Count() > 1)
+                {
+                    foreach (var business in group)
+                    {
+                        bool isOverdraft = (business.CreditFacilityType?.Data ?? string.Empty)
+                            .Trim().ToUpperInvariant() == "V";
+                        if (!isOverdraft)
+                        {
+                            business.DisbursementDateMisMatch = "UNL";
+                        }
+                    }
+                }
+            }
+        }
+
+        return businesses;
     }
     string REF_GetNameFromFile(string theFilename)
     {
@@ -6333,6 +6396,12 @@
             if (!string.IsNullOrWhiteSpace(bc.CustomerIDBusregnumTinumStatus))
             {
                 AddCellError(bc.CustomerID, "SAME BUSINESS REGISTRATION NUMBER OR TIN NUMBERS FOR DIFFERENT CUSTOMERS");
+            }
+
+            if (!string.IsNullOrWhiteSpace(bc.DisbursementDateMisMatch))
+            {
+                bc.DisbursementDate.Passed = false;
+                bc.DisbursementDate.Errors = new List<string>() { "DUPLICATE WITH DIFFERENT DISBURSEMENT DATE" };
             }
 
             NormalizeAccountAndCustomerFields(bc.Facilityaccnum, bc.CustomerID, "FACILITYACCNUM");

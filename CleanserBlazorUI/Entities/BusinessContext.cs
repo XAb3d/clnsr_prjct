@@ -4,6 +4,11 @@ namespace CleanserBlazorUI.Entities;
 public class BusinessContext
 {
     public string CustomerIDBusregnumTinumStatus { get; set; } = string.Empty;
+    /// <summary>Set to "UNL" when the same AccNum+CustomerID appears with a
+    /// different DisbursementDate elsewhere in the same submission -- exempted
+    /// for overdraft facilities (CreditFacilityType == "V"), which legitimately
+    /// redraw on new dates. Mirrors IndividualContext.DisbursementDateMisMatch.</summary>
+    public string DisbursementDateMisMatch { get; set; } = string.Empty;
     public string DisburStatus { get; set; }
     public string Status { get; set; }
     public string DateOfBirth { get; set; } = string.Empty;
