@@ -2927,9 +2927,10 @@
     // within one file. The caller must remove these synthetic records again
     // afterward (via the returned marker set) -- they must never reach
     // output, DB save, or counts.
-    List<IndividualContext> BuildReferenceVirtualRecordsInd(List<IndividualContext> incoming, List<IndividualRef> fromDatabase)
+    List<IndividualContext> BuildReferenceVirtualRecordsInd(List<IndividualContext> incoming, List<IndividualRef> fromDatabase, out Dictionary<string, string> previousNameByCustomer)
     {
         var virtualRecords = new List<IndividualContext>();
+        previousNameByCustomer = new Dictionary<string, string>();
         if (incoming == null || incoming.Count == 0 || fromDatabase == null || fromDatabase.Count == 0)
             return virtualRecords;
 
@@ -2970,6 +2971,17 @@
                 EzwichNum            = Cell(canonical.EzwichNum),
                 OtherIDNum           = Cell(canonical.OtherIDNum),
             });
+
+            // Readable "what's on file" name, natural word order -- for display
+            // in a misspelling warning/error, not for comparison (that's what
+            // the virtual record + existing token-matching logic is for).
+            var readableName = string.Join(" ", new[] { canonical.Surname, canonical.FirstName, canonical.MiddleNames }
+                .Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (!string.IsNullOrWhiteSpace(readableName))
+            {
+                previousNameByCustomer[group.Key] = readableName.Trim();
+            }
+
         }
 
         return virtualRecords;
@@ -3284,7 +3296,15 @@
                         // history get caught by the same cross-record logic that already
                         // catches conflicts within this file -- then discard the virtual
                         // records again before anything else sees them.
-                        var referenceVirtualsInd = BuildReferenceVirtualRecordsInd(mainMatcherTransformer_temp, RefData);
+                        var referenceVirtualsInd = BuildReferenceVirtualRecordsInd(mainMatcherTransformer_temp, RefData, out var previousNameByCustomer);
+                        foreach (var rec in mainMatcherTransformer_temp)
+                        {
+                            var custKey = NormalizeCustomerId(rec.CustomerID?.Data);
+                            if (!string.IsNullOrWhiteSpace(custKey) && previousNameByCustomer.TryGetValue(custKey, out var prevName))
+                            {
+                                rec.PreviousNameOnFile = prevName;
+                            }
+                        }
                         var forCrossChecksInd = mainMatcherTransformer_temp.Concat(referenceVirtualsInd).ToList();
                         forCrossChecksInd = RunAllCrossRecordChecksIND(forCrossChecksInd);
                         mainMatcherTransformer_temp = forCrossChecksInd.Except(referenceVirtualsInd).ToList();
@@ -5492,7 +5512,10 @@
                 if (!string.IsNullOrWhiteSpace(individualRow.SameCustomerIDDifferentName) &&
                     individualRow.SameCustomerIDDifferentName.StartsWith("W"))
                 {
-                    warningParts.Add("POSSIBLE MISSPELLING — NAME NEARLY MATCHES PRIOR RECORD FOR THIS CUSTOMER ID");
+                    string prevNameNote = !string.IsNullOrWhiteSpace(individualRow.PreviousNameOnFile)
+                        ? $" (PREVIOUS NAME ON FILE: {individualRow.PreviousNameOnFile})"
+                        : string.Empty;
+                    warningParts.Add($"POSSIBLE MISSPELLING — NAME NEARLY MATCHES PRIOR RECORD FOR THIS CUSTOMER ID{prevNameNote}");
                 }
 
                 // Reference name trust note (set by matcher or validation pass)
@@ -6889,9 +6912,12 @@
                 ic.SameCustomerIDDifferentName.StartsWith("E"))
             {
                 bool misspell14 = ic.SameCustomerIDDifferentName.Contains("MISSPELL");
+                string prevNameNote14 = !string.IsNullOrWhiteSpace(ic.PreviousNameOnFile)
+                    ? $" — PREVIOUS NAME ON FILE: {ic.PreviousNameOnFile}"
+                    : string.Empty;
                 string msg = misspell14
-                    ? "CUSTOMER ID CONFLICT: NAME PARTIALLY MATCHES — POSSIBLE MISSPELLING — MANUAL REVIEW REQUIRED"
-                    : "CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT NAMES ACROSS RECORDS";
+                    ? $"CUSTOMER ID CONFLICT: NAME PARTIALLY MATCHES — POSSIBLE MISSPELLING — MANUAL REVIEW REQUIRED{prevNameNote14}"
+                    : $"CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT NAMES ACROSS RECORDS{prevNameNote14}";
                 AddCellError(ic.CustomerID, msg);
                 AddCellError(ic.Surname, msg);
             }
