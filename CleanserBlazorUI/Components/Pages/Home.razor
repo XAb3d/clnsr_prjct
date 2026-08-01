@@ -2927,9 +2927,10 @@
     // within one file. The caller must remove these synthetic records again
     // afterward (via the returned marker set) -- they must never reach
     // output, DB save, or counts.
-    List<IndividualContext> BuildReferenceVirtualRecordsInd(List<IndividualContext> incoming, List<IndividualRef> fromDatabase)
+    List<IndividualContext> BuildReferenceVirtualRecordsInd(List<IndividualContext> incoming, List<IndividualRef> fromDatabase, out Dictionary<string, string> previousNameByCustomer)
     {
         var virtualRecords = new List<IndividualContext>();
+        previousNameByCustomer = new Dictionary<string, string>();
         if (incoming == null || incoming.Count == 0 || fromDatabase == null || fromDatabase.Count == 0)
             return virtualRecords;
 
@@ -2970,6 +2971,17 @@
                 EzwichNum            = Cell(canonical.EzwichNum),
                 OtherIDNum           = Cell(canonical.OtherIDNum),
             });
+
+            // Readable "what's on file" name, natural word order -- for display
+            // in a misspelling warning/error, not for comparison (that's what
+            // the virtual record + existing token-matching logic is for).
+            var readableName = string.Join(" ", new[] { canonical.Surname, canonical.FirstName, canonical.MiddleNames }
+                .Where(s => !string.IsNullOrWhiteSpace(s)));
+            if (!string.IsNullOrWhiteSpace(readableName))
+            {
+                previousNameByCustomer[group.Key] = readableName.Trim();
+            }
+
         }
 
         return virtualRecords;
@@ -3284,7 +3296,15 @@
                         // history get caught by the same cross-record logic that already
                         // catches conflicts within this file -- then discard the virtual
                         // records again before anything else sees them.
-                        var referenceVirtualsInd = BuildReferenceVirtualRecordsInd(mainMatcherTransformer_temp, RefData);
+                        var referenceVirtualsInd = BuildReferenceVirtualRecordsInd(mainMatcherTransformer_temp, RefData, out var previousNameByCustomer);
+                        foreach (var rec in mainMatcherTransformer_temp)
+                        {
+                            var custKey = NormalizeCustomerId(rec.CustomerID?.Data);
+                            if (!string.IsNullOrWhiteSpace(custKey) && previousNameByCustomer.TryGetValue(custKey, out var prevName))
+                            {
+                                rec.PreviousNameOnFile = prevName;
+                            }
+                        }
                         var forCrossChecksInd = mainMatcherTransformer_temp.Concat(referenceVirtualsInd).ToList();
                         forCrossChecksInd = RunAllCrossRecordChecksIND(forCrossChecksInd);
                         mainMatcherTransformer_temp = forCrossChecksInd.Except(referenceVirtualsInd).ToList();
@@ -5459,51 +5479,63 @@
                 ws.Cell(rowIndex, 176).Value = individualRow.G4HomeTel.OldData;
                 ws.Cell(rowIndex, 177).Value = individualRow.G4WorkTel.OldData;
                 ws.Cell(rowIndex, 178).Value = individualRow.G4Mobile.OldData;
-                var cellProperties = new List<CellDataAndStatus?>
-                    {
-                        individualRow.CreditFacilityAccNum,individualRow.CustomerID,individualRow.BranchCode,individualRow.NatIDNum,individualRow.Gender,
-                        individualRow.DateOfBirth,individualRow.Surname,individualRow.CurResAddr1,individualRow.PostAddrLine1,
-                        individualRow.CreditFacilityType,individualRow.FacilityTerm,individualRow.AmountCurrency,
-                        individualRow.FacilityAmount,individualRow.DisbursementDate,individualRow.DisbursementAmt,individualRow.MaturityDate,
-                        individualRow.SchdInstalAmount,individualRow.RepaymentFreq,individualRow.CurBal,individualRow.CurBalIndicator,individualRow.AmountInArrears,
-                        individualRow.NDIA,individualRow.FacilityStatusCode,individualRow.FacilityStatusDate
-                    };
-                string allErrors = stringHelper.JoinErrors(cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
-                ws.Cell(rowIndex, 179).Value = allErrors;
-
-                // ── Sprint 9/10: WARNING column (col 180) ────────────────────
-                // Build warning from ALL soft warning sources directly here
-                // so it's guaranteed to appear regardless of ISCleaned order.
-                var warningParts = new List<string>();
-
-                // Same-person duplicate CustomerID warning (set by cross-record checks)
-                if (!string.IsNullOrWhiteSpace(individualRow.SamePersonalIDDifferentCustomer) &&
-                    individualRow.SamePersonalIDDifferentCustomer.StartsWith("W"))
-                {
-                    string idField = individualRow.SamePersonalIDDifferentCustomer.Contains(":") ?
-                        individualRow.SamePersonalIDDifferentCustomer.Split(':')[1] : "PERSONAL ID";
-                    warningParts.Add(
-                        $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS");
-                }
-
-                // Near-match name warning: same CustomerID, tokens matched well enough to
-                // pass (isSame), but not a perfect match -- e.g. "KOFL" vs "KOFI". Not
-                // blocking, but worth a note rather than passing through silently.
-                if (!string.IsNullOrWhiteSpace(individualRow.SameCustomerIDDifferentName) &&
-                    individualRow.SameCustomerIDDifferentName.StartsWith("W"))
-                {
-                    warningParts.Add("POSSIBLE MISSPELLING — NAME NEARLY MATCHES PRIOR RECORD FOR THIS CUSTOMER ID");
-                }
-
-                // Reference name trust note (set by matcher or validation pass)
-                if (!string.IsNullOrWhiteSpace(individualRow.ReferenceNameTrustNote) &&
-                    !individualRow.ReferenceNameTrustNote.StartsWith("POSSIBLE DUPLICATE"))
-                    warningParts.Add(individualRow.ReferenceNameTrustNote);
-
-                ws.Cell(rowIndex, 180).Value = warningParts.Count > 0
-                    ? string.Join(" | ", warningParts)
-                    : string.Empty;
             }
+
+            // Errors (col 179) and Warnings (col 180) reflect the same underlying
+            // field state regardless of destination sheet -- moved out of the
+            // if (!isSlean) block above, which previously meant this never ran
+            // for CLEAN records at all, only UNL. That's exactly backwards from
+            // where a "near-miss, not blocking" warning matters most: a CLEAN
+            // record has no Errors-column content to review otherwise, so the
+            // Warnings column was its only place to surface a note -- and it
+            // never got one.
+            var cellProperties = new List<CellDataAndStatus?>
+                {
+                    individualRow.CreditFacilityAccNum,individualRow.CustomerID,individualRow.BranchCode,individualRow.NatIDNum,individualRow.Gender,
+                    individualRow.DateOfBirth,individualRow.Surname,individualRow.CurResAddr1,individualRow.PostAddrLine1,
+                    individualRow.CreditFacilityType,individualRow.FacilityTerm,individualRow.AmountCurrency,
+                    individualRow.FacilityAmount,individualRow.DisbursementDate,individualRow.DisbursementAmt,individualRow.MaturityDate,
+                    individualRow.SchdInstalAmount,individualRow.RepaymentFreq,individualRow.CurBal,individualRow.CurBalIndicator,individualRow.AmountInArrears,
+                    individualRow.NDIA,individualRow.FacilityStatusCode,individualRow.FacilityStatusDate
+                };
+            string allErrors = stringHelper.JoinErrors(cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
+            ws.Cell(rowIndex, 179).Value = allErrors;
+
+            // ── Sprint 9/10: WARNING column (col 180) ────────────────────
+            // Build warning from ALL soft warning sources directly here
+            // so it's guaranteed to appear regardless of ISCleaned order.
+            var warningParts = new List<string>();
+
+            // Same-person duplicate CustomerID warning (set by cross-record checks)
+            if (!string.IsNullOrWhiteSpace(individualRow.SamePersonalIDDifferentCustomer) &&
+                individualRow.SamePersonalIDDifferentCustomer.StartsWith("W"))
+            {
+                string idField = individualRow.SamePersonalIDDifferentCustomer.Contains(":") ?
+                    individualRow.SamePersonalIDDifferentCustomer.Split(':')[1] : "PERSONAL ID";
+                warningParts.Add(
+                    $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {idField} IS SHARED ACROSS MULTIPLE CUSTOMER IDS");
+            }
+
+            // Near-match name warning: same CustomerID, tokens matched well enough to
+            // pass (isSame), but not a perfect match -- e.g. "KOFL" vs "KOFI". Not
+            // blocking, but worth a note rather than passing through silently.
+            if (!string.IsNullOrWhiteSpace(individualRow.SameCustomerIDDifferentName) &&
+                individualRow.SameCustomerIDDifferentName.StartsWith("W"))
+            {
+                string prevNameNote = !string.IsNullOrWhiteSpace(individualRow.PreviousNameOnFile)
+                    ? $" (PREVIOUS NAME ON FILE: {individualRow.PreviousNameOnFile})"
+                    : string.Empty;
+                warningParts.Add($"POSSIBLE MISSPELLING — NAME NEARLY MATCHES PRIOR RECORD FOR THIS CUSTOMER ID{prevNameNote}");
+            }
+
+            // Reference name trust note (set by matcher or validation pass)
+            if (!string.IsNullOrWhiteSpace(individualRow.ReferenceNameTrustNote) &&
+                !individualRow.ReferenceNameTrustNote.StartsWith("POSSIBLE DUPLICATE"))
+                warningParts.Add(individualRow.ReferenceNameTrustNote);
+
+            ws.Cell(rowIndex, 180).Value = warningParts.Count > 0
+                ? string.Join(" | ", warningParts)
+                : string.Empty;
         }
         else if (row is BusinessContextDud businessDudRow)
         {
@@ -6889,9 +6921,12 @@
                 ic.SameCustomerIDDifferentName.StartsWith("E"))
             {
                 bool misspell14 = ic.SameCustomerIDDifferentName.Contains("MISSPELL");
+                string prevNameNote14 = !string.IsNullOrWhiteSpace(ic.PreviousNameOnFile)
+                    ? $" — PREVIOUS NAME ON FILE: {ic.PreviousNameOnFile}"
+                    : string.Empty;
                 string msg = misspell14
-                    ? "CUSTOMER ID CONFLICT: NAME PARTIALLY MATCHES — POSSIBLE MISSPELLING — MANUAL REVIEW REQUIRED"
-                    : "CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT NAMES ACROSS RECORDS";
+                    ? $"CUSTOMER ID CONFLICT: NAME PARTIALLY MATCHES — POSSIBLE MISSPELLING — MANUAL REVIEW REQUIRED{prevNameNote14}"
+                    : $"CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT NAMES ACROSS RECORDS{prevNameNote14}";
                 AddCellError(ic.CustomerID, msg);
                 AddCellError(ic.Surname, msg);
             }

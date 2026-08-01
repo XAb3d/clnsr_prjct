@@ -35,6 +35,16 @@ public class IndividualContext
     /// </summary>
     public string? ReferenceCanonicalName { get; set; } = null;
     /// <summary>
+    /// Human-readable "what's on file" name (natural word order, not the
+    /// sorted-tokens form ReferenceCanonicalName uses for comparison), set
+    /// whenever this CustomerID has reference history -- so a misspelling
+    /// warning/error can show the previous name alongside the flag, not just
+    /// say something changed. Free byproduct of the same per-customer
+    /// reference lookup Phase 4 already builds for cross-checking -- no
+    /// extra DB query or file pass.
+    /// </summary>
+    public string? PreviousNameOnFile { get; set; } = null;
+    /// <summary>
     /// Set when the name was accepted based on reference trust. Written to WARNING column.
     /// </summary>
     public string? ReferenceNameTrustNote { get; set; } = null;
