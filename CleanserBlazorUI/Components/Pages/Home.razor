@@ -6069,6 +6069,20 @@
                     bc.Busregnum.Errors = new List<string>() { " Busregnum or Tinum: cannot be a Ghana card or contains 6 or more consecutive repeating characters " };
                 }
 
+                // ── All-numeric registration number ─────────────────────────────
+                // Unlike a personal ID, a Business registration number being purely
+                // numeric (no letters at all -- Ghana business reg numbers normally
+                // carry a letter prefix, e.g. "CS", "BN") is itself suspicious, not
+                // just a sequential-placeholder pattern. Same 2019 cutoff precedent
+                // as the blank-IDs check above -- only enforced on recent
+                // submissions, so historical records aren't retroactively flagged.
+                if (!string.IsNullOrWhiteSpace(bc.Busregnum.Data) &&
+                    bc.Busregnum.Data.All(char.IsDigit) &&
+                    _date.IsValidFormat && _date.TheDate.Year > 2019)
+                {
+                    AddCellError(bc.Busregnum, "BUSREGNUM: ALL-NUMERIC REGISTRATION NUMBER — PROVIDE A VALID REGISTRATION NUMBER");
+                }
+
             }
             if (bc.CreditFacilityType.Data == "P")
             {
@@ -6508,6 +6522,36 @@
             {
                 ic.NatIDNum.Passed = false;
                 ic.NatIDNum.Errors = new List<string>() { "WRONG OR EMPTY IDS. PROVIDE VALID IDS" };
+            }
+
+            // ── Sequential placeholder digits (e.g. "123456789", "012345") ──────
+            // Unlike Business registration numbers, an all-numeric personal ID is
+            // normal and acceptable on its own -- Ghana Card numbers aside, many
+            // legitimate ID types are pure digits. What's specifically suspicious
+            // is a STRICTLY ASCENDING digit run, the classic placeholder someone
+            // types when they don't have a real value to enter.
+            static bool IsSequentialPlaceholderDigits(string? value)
+            {
+                if (string.IsNullOrWhiteSpace(value)) return false;
+                var cleaned = new string(value.Where(c => !char.IsWhiteSpace(c) && c != '-').ToArray());
+                if (cleaned.Length < 6 || !cleaned.All(char.IsDigit)) return false;
+                for (int i = 1; i < cleaned.Length; i++)
+                {
+                    if (cleaned[i] - cleaned[i - 1] != 1) return false;
+                }
+                return true;
+            }
+            const string sequentialIdMsg = "ID APPEARS TO BE A SEQUENTIAL PLACEHOLDER VALUE (e.g. 123456789) — PROVIDE A VALID ID";
+            foreach (var (idField, idLabel) in new (CellDataAndStatus? field, string label)[]
+            {
+                (ic.NatIDNum, "NATIDNUM"), (ic.VotersIDNum, "VOTERSIDNUM"), (ic.DriverLicNum, "DRIVERLICNUM"),
+                (ic.PassportNum, "PASSPORTNUM"), (ic.SSNum, "SSNUM"), (ic.EzwichNum, "EZWICHNUM"), (ic.OtherIDNum, "OTHERIDNUM")
+            })
+            {
+                if (IsSequentialPlaceholderDigits(idField?.Data))
+                {
+                    AddCellError(idField, sequentialIdMsg);
+                }
             }
 
 
