@@ -3065,6 +3065,8 @@
 
         return virtualRecords;
     }
+
+    (List<IndividualContext> allRecords, List<IndividualContext> duplicatesInd, string correctDateOfBirth, string dobIssues, string matchdata, string newdata, string duplicatescount) REF_MainMatcherTransformerInd_Clean_IND(List<IndividualRef> fromDatabase, List<IndividualContext> _fromExcelFile, bool handleDuplicates = true)
     {
         // Initialize lists to store processed Excel records and duplicates
         List<IndividualContext> processedExcelRecords = new List<IndividualContext>();
