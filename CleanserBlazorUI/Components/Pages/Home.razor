@@ -260,6 +260,8 @@
 
     // ── Unloadable Log (on-demand, section 1 header row + rejection breakdown) ──
     List<IndividualContext>? _lastUnlBatchInd = null;
+    int _lastDuplicateCountInd = 0;
+    int _lastTotalRecordsInd = 0;
     string _lastUnlFilename = string.Empty;
     string _lastUnlSubcode = string.Empty;
     string _lastUnlDataType = string.Empty;
@@ -428,7 +430,7 @@
             LogYear = _lastUnlLogYear
         };
 
-        byte[] logBytes = UnloadableLogService.GenerateWorkbook(_lastUnlBatchInd, header);
+        byte[] logBytes = UnloadableLogService.GenerateWorkbook(_lastUnlBatchInd, header, _lastDuplicateCountInd, _lastTotalRecordsInd);
         string downloadName = $"UnloadableLog_{_lastUnlSubcode}_{_lastUnlReportingYear}{_lastUnlMonths}.xlsx";
         await JS.InvokeVoidAsync("downloadFile", downloadName, logBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
@@ -3318,7 +3320,14 @@
                         // ── Unloadable Log: capture this run's UNL batch + context ──
                         // so the on-demand "Generate Unloadable Log" button has
                         // something to work from after the run finishes.
-                        _lastUnlBatchInd = _duplicatesInd;
+                        //
+                        // Was previously sourced from _duplicatesInd (the DUPLICATE
+                        // sheet's list) -- wrong list entirely. The true UNL-bound
+                        // subset is whatever in mainMatcherTransformer fails
+                        // ISCleaned; that's what the UNL sheet itself actually shows.
+                        _lastUnlBatchInd = mainMatcherTransformer.Where(r => !ISCleaned(r)).ToList();
+                        _lastDuplicateCountInd = _duplicatesInd?.Count ?? 0;
+                        _lastTotalRecordsInd = mainMatcherTransformer.Count + _lastDuplicateCountInd;
                         _lastUnlFilename = filename;
                         _lastUnlDataType = "IND";
                         _lastUnlSubcode = await DataManagementService.GetFileShortCodeFromFileName(filename);
