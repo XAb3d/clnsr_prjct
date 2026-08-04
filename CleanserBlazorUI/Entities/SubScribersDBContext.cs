@@ -367,6 +367,7 @@ public class BusinessRef
     // ── Identity fields for reference-trust validation (mirrors IndividualRef) ──
     public string? Businessname { get; set; } = string.Empty;
     public string? Busregnum { get; set; } = string.Empty;
+    public string? Tinum { get; set; } = string.Empty;
     // ── Closed-facility tracking ────────────────────────────────────────────
     public string? FacilityStatusCode { get; set; } = string.Empty;
 }

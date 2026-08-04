@@ -1751,8 +1751,11 @@
         }
         return (recordFromClient, "N/A", "N/A", matchdata.ToString());
     }
-    (List<BusinessContext> allRecords, List<BusinessContext> duplicatesInd, string correctDateOfBirth, string dobIssues, string matchdata, string newdata, string duplicatescount) REF_MainMatcherTransformerInd_Clean_BUS(List<BusinessRef> fromDatabase, List<BusinessContext> fromExcelFile, bool handleDuplicates = true)
+    (List<BusinessContext> allRecords, List<BusinessContext> duplicatesInd, string correctDateOfBirth, string dobIssues, string matchdata, string newdata, string duplicatescount) REF_MainMatcherTransformerInd_Clean_BUS(List<BusinessRef> fromDatabase, List<BusinessContext> fromExcelFileRaw, bool handleDuplicates = true)
     {
+        // Flag same-submission overdraft redraws before dedup, mirroring the IND matcher.
+        var fromExcelFile = AssignDuplicateDoBIssuesBus(fromExcelFileRaw);
+
         List<BusinessContext> processedExcelRecords = new();
         List<BusinessContext> duplicatesList = new();
 
@@ -1779,11 +1782,21 @@
             processedExcelRecords = fromExcelFile.ToList();
         }
 
-        var databaseDict = new Dictionary<(string, string), BusinessRef>();
+        // A facility can legitimately have MULTIPLE historical rows (one per
+        // DisbursementDate ever seen -- this is the whole point for overdrafts).
+        // Keep the full list per key instead of collapsing to the last-seen row,
+        // or history for earlier draws silently disappears. Same fix already
+        // applied to the IND matcher.
+        var databaseDict = new Dictionary<(string, string), List<BusinessRef>>();
         foreach (var dbRecord in fromDatabase)
         {
             var key = (NormalizeAccountNumber(dbRecord.CreditFacilityAccNum), NormalizeCustomerId(dbRecord.CustomerID));
-            databaseDict[key] = dbRecord;
+            if (!databaseDict.TryGetValue(key, out var list))
+            {
+                list = new List<BusinessRef>();
+                databaseDict[key] = list;
+            }
+            list.Add(dbRecord);
         }
 
         int __correctDateOfBirth = 0;
@@ -1800,11 +1813,23 @@
 
             var key = (creditFacilityAccNum, customerID);
 
-            if (databaseDict.TryGetValue(key, out var dbRecord))
+            if (databaseDict.TryGetValue(key, out var dbRecords) && dbRecords.Count > 0)
             {
                 var excelDob = excelRecord.DateOfBirth;
                 __matchdata++;
-                if (dbRecord.DisbursementDate != disbursementDate)
+
+                // Overdraft facilities legitimately redraw on new dates -- exempt
+                // from the disbursement-date-mismatch rule, same exemption
+                // already applied to the IND matcher.
+                bool isOverdraft = (excelRecord.CreditFacilityType?.Data ?? string.Empty)
+                    .Trim().ToUpperInvariant() == "V";
+
+                var dbRecord = dbRecords.FirstOrDefault(r => r.DisbursementDate == disbursementDate)
+                                ?? dbRecords[0];
+
+                bool dateOnFile = dbRecords.Any(r => r.DisbursementDate == disbursementDate);
+
+                if (!dateOnFile && !isOverdraft)
                 {
                     excelRecord.DisburStatus = " THE DISBURSEMENT DATE DOES NOT MATCH THE PREVIOUS SUBMISSION ";
                     __burscount++;
@@ -2987,6 +3012,60 @@
         return virtualRecords;
     }
 
+    // ── Phase 4 (BUS): same technique as the IND version above ──────────────
+    // One virtual BusinessContext per CustomerID, built from whichever
+    // BusinessRef row for that customer was most recently updated. Injected
+    // into the same list CheckForChangesInCustomerIDBusregnumTinum already
+    // processes -- its existing byCustomerID grouping (section 1) naturally
+    // compares a real incoming record's Businessname/Busregnum/Tinum against
+    // its own reference history the same way it already compares two records
+    // within one file. Caller must remove these again via the returned
+    // virtualRecords list (e.g. .Except()) before anything else sees them.
+    List<BusinessContext> BuildReferenceVirtualRecordsBus(List<BusinessContext> incoming, List<BusinessRef> fromDatabase, out Dictionary<string, string> previousNameByCustomer)
+    {
+        var virtualRecords = new List<BusinessContext>();
+        previousNameByCustomer = new Dictionary<string, string>();
+        if (incoming == null || incoming.Count == 0 || fromDatabase == null || fromDatabase.Count == 0)
+            return virtualRecords;
+
+        var customerKeys = incoming
+            .Select(r => NormalizeCustomerId(r.CustomerID?.Data))
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .ToHashSet();
+
+        var refByCustomer = fromDatabase
+            .Where(r => customerKeys.Contains(NormalizeCustomerId(r.CustomerID)))
+            .GroupBy(r => NormalizeCustomerId(r.CustomerID));
+
+        foreach (var group in refByCustomer)
+        {
+            var canonical = group.OrderByDescending(r => r.LastUpdatedDate).First();
+
+            CellDataAndStatus Cell(string? v)
+            {
+                var value = v ?? string.Empty;
+                return new CellDataAndStatus(value) { Data = value };
+            }
+
+            virtualRecords.Add(new BusinessContext
+            {
+                CustomerID       = Cell(canonical.CustomerID),
+                Facilityaccnum   = Cell(canonical.CreditFacilityAccNum),
+                DisbursementDate = Cell(canonical.DisbursementDate),
+                Businessname     = Cell(canonical.Businessname),
+                Busregnum        = Cell(canonical.Busregnum),
+                Tinum            = Cell(canonical.Tinum),
+            });
+
+            if (!string.IsNullOrWhiteSpace(canonical.Businessname))
+            {
+                previousNameByCustomer[group.Key] = canonical.Businessname.Trim();
+            }
+        }
+
+        return virtualRecords;
+    }
+
     (List<IndividualContext> allRecords, List<IndividualContext> duplicatesInd, string correctDateOfBirth, string dobIssues, string matchdata, string newdata, string duplicatescount) REF_MainMatcherTransformerInd_Clean_IND(List<IndividualRef> fromDatabase, List<IndividualContext> _fromExcelFile, bool handleDuplicates = true)
     {
         // Initialize lists to store processed Excel records and duplicates
@@ -3207,6 +3286,44 @@
 
         // Return updated list
         return individuals;
+    }
+
+    // ── BUS equivalent, disbursement-date only ───────────────────────────────
+    // BusinessContext.DateOfBirth is a plain string (not a validated
+    // CellDataAndStatus field, unlike Individual) -- there's no meaningful
+    // "duplicate DOB" concept for a business, so this only ports the
+    // disbursement-date half of AssignDuplicateDoBIssues, which is the part
+    // that actually matters here: an overdraft facility legitimately redrawn
+    // more than once in the same submission shouldn't be flagged.
+    List<BusinessContext> AssignDuplicateDoBIssuesBus(List<BusinessContext> businesses)
+    {
+        var groups = businesses.GroupBy(b => new
+        {
+            Credit = NormalizeAccountNumber(b.Facilityaccnum?.Data),
+            Customer = NormalizeCustomerId(b.CustomerID?.Data),
+        });
+
+        foreach (var group in groups)
+        {
+            if (group.Count() > 1)
+            {
+                var disValues = group.Select(b => b.DisbursementDate?.Data);
+                if (disValues.Distinct().Count() > 1)
+                {
+                    foreach (var business in group)
+                    {
+                        bool isOverdraft = (business.CreditFacilityType?.Data ?? string.Empty)
+                            .Trim().ToUpperInvariant() == "V";
+                        if (!isOverdraft)
+                        {
+                            business.DisbursementDateMisMatch = "UNL";
+                        }
+                    }
+                }
+            }
+        }
+
+        return businesses;
     }
     string REF_GetNameFromFile(string theFilename)
     {
@@ -3444,7 +3561,15 @@
                         var RefData = await DataManagementService.GETReferenceData_BUS(filename);
                         isSubscriber_X_or_Y = await DataManagementService.GetSubscribeX_or_Y(filename);
                         var (mainMatcherTransformer, _duplicatesInd, _correctDateOfBirth, _dobIssues, _matchdata, _newdata, _duplicateCount) = REF_MainMatcherTransformerInd_Clean_BUS(RefData, ExcelDataRecieved);
-                        var mainMatcherTransformer_temp = CheckForChangesInCustomerIDBusregnumTinum(mainMatcherTransformer);
+                        // Fold reference in as virtual records so Businessname/Busregnum/Tinum
+                        // conflicts against history get caught by the same cross-record logic
+                        // that already catches conflicts within this file (Phase 4 for BUS,
+                        // mirroring the IND version) -- then discard the virtual records again
+                        // before anything else sees them.
+                        var referenceVirtualsBus = BuildReferenceVirtualRecordsBus(mainMatcherTransformer, RefData, out _);
+                        var forCrossChecksBus = mainMatcherTransformer.Concat(referenceVirtualsBus).ToList();
+                        forCrossChecksBus = CheckForChangesInCustomerIDBusregnumTinum(forCrossChecksBus);
+                        var mainMatcherTransformer_temp = forCrossChecksBus.Except(referenceVirtualsBus).ToList();
                         mainMatcherTransformer = mainMatcherTransformer_temp;
                         correctDateOfBirth = _correctDateOfBirth.ToString();
                         dobIssues = _dobIssues.ToString();
@@ -5946,6 +6071,20 @@
                     bc.Busregnum.Errors = new List<string>() { " Busregnum or Tinum: cannot be a Ghana card or contains 6 or more consecutive repeating characters " };
                 }
 
+                // ── All-numeric registration number ─────────────────────────────
+                // Unlike a personal ID, a Business registration number being purely
+                // numeric (no letters at all -- Ghana business reg numbers normally
+                // carry a letter prefix, e.g. "CS", "BN") is itself suspicious, not
+                // just a sequential-placeholder pattern. Same 2019 cutoff precedent
+                // as the blank-IDs check above -- only enforced on recent
+                // submissions, so historical records aren't retroactively flagged.
+                if (!string.IsNullOrWhiteSpace(bc.Busregnum.Data) &&
+                    bc.Busregnum.Data.All(char.IsDigit) &&
+                    _date.IsValidFormat && _date.TheDate.Year > 2019)
+                {
+                    AddCellError(bc.Busregnum, "BUSREGNUM: ALL-NUMERIC REGISTRATION NUMBER — PROVIDE A VALID REGISTRATION NUMBER");
+                }
+
             }
             if (bc.CreditFacilityType.Data == "P")
             {
@@ -6275,6 +6414,12 @@
                 AddCellError(bc.CustomerID, "SAME BUSINESS REGISTRATION NUMBER OR TIN NUMBERS FOR DIFFERENT CUSTOMERS");
             }
 
+            if (!string.IsNullOrWhiteSpace(bc.DisbursementDateMisMatch))
+            {
+                bc.DisbursementDate.Passed = false;
+                bc.DisbursementDate.Errors = new List<string>() { "DUPLICATE WITH DIFFERENT DISBURSEMENT DATE" };
+            }
+
             NormalizeAccountAndCustomerFields(bc.Facilityaccnum, bc.CustomerID, "FACILITYACCNUM");
 
             if (!stringHelper.AccountCustomerInValidCharacter(bc.CustomerID.Data))
@@ -6379,6 +6524,36 @@
             {
                 ic.NatIDNum.Passed = false;
                 ic.NatIDNum.Errors = new List<string>() { "WRONG OR EMPTY IDS. PROVIDE VALID IDS" };
+            }
+
+            // ── Sequential placeholder digits (e.g. "123456789", "012345") ──────
+            // Unlike Business registration numbers, an all-numeric personal ID is
+            // normal and acceptable on its own -- Ghana Card numbers aside, many
+            // legitimate ID types are pure digits. What's specifically suspicious
+            // is a STRICTLY ASCENDING digit run, the classic placeholder someone
+            // types when they don't have a real value to enter.
+            static bool IsSequentialPlaceholderDigits(string? value)
+            {
+                if (string.IsNullOrWhiteSpace(value)) return false;
+                var cleaned = new string(value.Where(c => !char.IsWhiteSpace(c) && c != '-').ToArray());
+                if (cleaned.Length < 6 || !cleaned.All(char.IsDigit)) return false;
+                for (int i = 1; i < cleaned.Length; i++)
+                {
+                    if (cleaned[i] - cleaned[i - 1] != 1) return false;
+                }
+                return true;
+            }
+            const string sequentialIdMsg = "ID APPEARS TO BE A SEQUENTIAL PLACEHOLDER VALUE (e.g. 123456789) — PROVIDE A VALID ID";
+            foreach (var (idField, idLabel) in new (CellDataAndStatus? field, string label)[]
+            {
+                (ic.NatIDNum, "NATIDNUM"), (ic.VotersIDNum, "VOTERSIDNUM"), (ic.DriverLicNum, "DRIVERLICNUM"),
+                (ic.PassportNum, "PASSPORTNUM"), (ic.SSNum, "SSNUM"), (ic.EzwichNum, "EZWICHNUM"), (ic.OtherIDNum, "OTHERIDNUM")
+            })
+            {
+                if (IsSequentialPlaceholderDigits(idField?.Data))
+                {
+                    AddCellError(idField, sequentialIdMsg);
+                }
             }
 
 
