@@ -4,6 +4,7 @@ using CleanserBlazorUI.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace CleanserBlazorUI.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260729025215_AddIndividualRefMiddleNames")]
+    partial class AddIndividualRefMiddleNames
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -126,12 +129,6 @@ namespace CleanserBlazorUI.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("Businessname")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Busregnum")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<DateTime>("CreatedDate")
                         .HasColumnType("datetime2");
 
@@ -151,17 +148,11 @@ namespace CleanserBlazorUI.Migrations
                     b.Property<string>("DisbursementDate")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("FacilityStatusCode")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<DateTime>("LastUpdatedDate")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("SubscriberCode")
                         .IsRequired()
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("Tinum")
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
@@ -199,9 +190,6 @@ namespace CleanserBlazorUI.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("EzwichNum")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("FacilityStatusCode")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("FirstName")
