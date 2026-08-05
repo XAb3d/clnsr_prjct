@@ -141,7 +141,7 @@
                         <MudDivider Class="mb-3"></MudDivider>
                         <MudAlert Severity="MudBlazor.Severity.Info" Class="mb-3" Dense="true">
                             Generates the unloadable log's header row plus the Demographic/Financial rejection
-                            breakdown tables for the file just cleaned (@(_lastUnlBatchInd?.Count ?? 0) UNL records).
+                            breakdown tables for the file just cleaned (@((_lastUnlDataType == "BUS" ? _lastUnlBatchBus?.Count : _lastUnlBatchInd?.Count) ?? 0) UNL records).
                             Subscriber Name / Institution Type are filled in once per subscriber and remembered
                             after that. Date Emailed / Date Fixed are left blank for now to fill in manually.
                         </MudAlert>
@@ -262,6 +262,9 @@
     List<IndividualContext>? _lastUnlBatchInd = null;
     int _lastDuplicateCountInd = 0;
     int _lastTotalRecordsInd = 0;
+    List<BusinessContext>? _lastUnlBatchBus = null;
+    int _lastDuplicateCountBus = 0;
+    int _lastTotalRecordsBus = 0;
     string _lastUnlFilename = string.Empty;
     string _lastUnlSubcode = string.Empty;
     string _lastUnlDataType = string.Empty;
@@ -391,9 +394,16 @@
     }
 
     // ── Unloadable Log: on-demand, for the file most recently cleaned ──
+    // Dispatches on _lastUnlDataType ("IND" or "BUS") since IndividualContext
+    // and BusinessContext are different T's for UnloadableLogService's
+    // generic methods -- everything after that (header, DB persistence,
+    // alerts) is identical for either type.
     async Task GenerateUnloadableLogClicked()
     {
-        if (_lastUnlBatchInd == null || _lastUnlBatchInd.Count == 0)
+        bool isBusiness = _lastUnlDataType == "BUS";
+        int unlCount = isBusiness ? (_lastUnlBatchBus?.Count ?? 0) : (_lastUnlBatchInd?.Count ?? 0);
+
+        if (unlCount == 0)
         {
             AlertSeverityMessage = "No unloadable records to report for the last run.";
             AlertSeverity = MudBlazor.Severity.Warning;
@@ -408,7 +418,9 @@
         }
 
         _unlLogSerialCounter++;
-        var reasonSummary = UnloadableLogService.BuildUnloadableReasonSummary(_lastUnlBatchInd);
+        string reasonSummary = isBusiness
+            ? UnloadableLogService.BuildUnloadableReasonSummary(_lastUnlBatchBus)
+            : UnloadableLogService.BuildUnloadableReasonSummary(_lastUnlBatchInd);
 
         var header = new UnloadableLogService.UnloadableLogHeader
         {
@@ -418,7 +430,7 @@
             InstitutionType = UnlLogInstitutionType,
             Associate = UnlLogAssociate,
             Filename = _lastUnlFilename,
-            NumberOfRecords = _lastUnlBatchInd.Count,
+            NumberOfRecords = unlCount,
             ReportingPeriod = _lastUnlReportingPeriod,
             ReportingYear = _lastUnlReportingYear,
             UnloadableReason = reasonSummary,
@@ -430,7 +442,9 @@
             LogYear = _lastUnlLogYear
         };
 
-        byte[] logBytes = UnloadableLogService.GenerateWorkbook(_lastUnlBatchInd, header, _lastDuplicateCountInd, _lastTotalRecordsInd);
+        byte[] logBytes = isBusiness
+            ? UnloadableLogService.GenerateWorkbook(_lastUnlBatchBus, header, _lastDuplicateCountBus, _lastTotalRecordsBus)
+            : UnloadableLogService.GenerateWorkbook(_lastUnlBatchInd, header, _lastDuplicateCountInd, _lastTotalRecordsInd);
         string downloadName = $"UnloadableLog_{_lastUnlSubcode}_{_lastUnlReportingYear}{_lastUnlMonths}.xlsx";
         await JS.InvokeVoidAsync("downloadFile", downloadName, logBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
@@ -440,13 +454,23 @@
         string dbSaveWarning = string.Empty;
         try
         {
-            var messageSummaries = UnloadableLogService.SummarizeByMessage(_lastUnlBatchInd, _lastDuplicateCountInd, _lastTotalRecordsInd);
-            var categorySummaries = new List<(string, List<UnloadableLogService.CategoryRejectionSummary>)>
-            {
-                ("Demographic", UnloadableLogService.SummarizeByCategory(_lastUnlBatchInd, "Demographic")),
-                ("Financial", UnloadableLogService.SummarizeByCategory(_lastUnlBatchInd, "Financial")),
-                ("FacilitySubmission", UnloadableLogService.SummarizeByCategory(_lastUnlBatchInd, "FacilitySubmission", _lastDuplicateCountInd))
-            };
+            var messageSummaries = isBusiness
+                ? UnloadableLogService.SummarizeByMessage(_lastUnlBatchBus, _lastDuplicateCountBus, _lastTotalRecordsBus)
+                : UnloadableLogService.SummarizeByMessage(_lastUnlBatchInd, _lastDuplicateCountInd, _lastTotalRecordsInd);
+
+            var categorySummaries = isBusiness
+                ? new List<(string, List<UnloadableLogService.CategoryRejectionSummary>)>
+                {
+                    ("Demographic", UnloadableLogService.SummarizeByCategory(_lastUnlBatchBus, "Demographic")),
+                    ("Financial", UnloadableLogService.SummarizeByCategory(_lastUnlBatchBus, "Financial")),
+                    ("FacilitySubmission", UnloadableLogService.SummarizeByCategory(_lastUnlBatchBus, "FacilitySubmission", _lastDuplicateCountBus))
+                }
+                : new List<(string, List<UnloadableLogService.CategoryRejectionSummary>)>
+                {
+                    ("Demographic", UnloadableLogService.SummarizeByCategory(_lastUnlBatchInd, "Demographic")),
+                    ("Financial", UnloadableLogService.SummarizeByCategory(_lastUnlBatchInd, "Financial")),
+                    ("FacilitySubmission", UnloadableLogService.SummarizeByCategory(_lastUnlBatchInd, "FacilitySubmission", _lastDuplicateCountInd))
+                };
 
             await DataManagementService.SaveUnloadableLogAsync(
                 _lastUnlSubcode, UnlLogSubscriberName, UnlLogInstitutionType,
@@ -461,7 +485,7 @@
             dbSaveWarning = $" (warning: could not save to log history: {ex.Message})";
         }
 
-        AlertSeverityMessage = $"Unloadable log generated ({_lastUnlBatchInd.Count} records).{dbSaveWarning}";
+        AlertSeverityMessage = $"Unloadable log generated ({unlCount} records).{dbSaveWarning}";
         AlertSeverity = string.IsNullOrEmpty(dbSaveWarning) ? MudBlazor.Severity.Success : MudBlazor.Severity.Warning;
         AlertSeverityVisible = "d-block";
         StateHasChanged();
@@ -3612,6 +3636,29 @@
                         matchdata = _matchdata.ToString();
                         newdata = _newdata.ToString();
                         duplicateCount = _duplicateCount.ToString();
+
+                        // ── Unloadable Log: capture this run's UNL batch + context ──
+                        // Mirrors the IND capture block above -- same "no records to
+                        // report" bug fixed the same way: sourced from whatever in
+                        // mainMatcherTransformer fails ISCleaned, not from _duplicatesInd.
+                        _lastUnlBatchBus = mainMatcherTransformer.Where(r => !ISCleaned(r)).ToList();
+                        _lastDuplicateCountBus = _duplicatesInd?.Count ?? 0;
+                        _lastTotalRecordsBus = mainMatcherTransformer.Count + _lastDuplicateCountBus;
+                        _lastUnlFilename = filename;
+                        _lastUnlDataType = "BUS";
+                        _lastUnlSubcode = await DataManagementService.GetFileShortCodeFromFileName(filename);
+                        var unlFDateBus = stringHelper.GetFacilityDateFromFileName(filename, true);
+                        if (unlFDateBus.IsValid && DateTime.TryParseExact(unlFDateBus.LastDate, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var unlParsedDateBus))
+                        {
+                            _lastUnlReportingPeriod = unlParsedDateBus.ToString("MMMM yyyy");
+                            _lastUnlReportingYear = unlParsedDateBus.Year.ToString();
+                            _lastUnlMonths = unlParsedDateBus.ToString("MMMM");
+                            _lastUnlLogYear = unlParsedDateBus.Year.ToString();
+                        }
+                        var unlExistingProfileBus = await DataManagementService.GetSubscriberProfileAsync(_lastUnlSubcode);
+                        UnlLogSubscriberName = unlExistingProfileBus?.SubscriberName ?? string.Empty;
+                        UnlLogInstitutionType = unlExistingProfileBus?.InstitutionType ?? string.Empty;
+                        unlLogPanelView = (_duplicatesInd != null && _duplicatesInd.Count > 0) ? "d-block" : "d-none";
 
                         var trulyCleanBus = mainMatcherTransformer.Where(r => ISCleaned(r)).ToList();
                         if (CleanOnlyOrCleanAndReference == false)
