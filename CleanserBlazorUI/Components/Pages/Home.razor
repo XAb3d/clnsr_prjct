@@ -434,8 +434,35 @@
         string downloadName = $"UnloadableLog_{_lastUnlSubcode}_{_lastUnlReportingYear}{_lastUnlMonths}.xlsx";
         await JS.InvokeVoidAsync("downloadFile", downloadName, logBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
-        AlertSeverityMessage = $"Unloadable log generated ({_lastUnlBatchInd.Count} records).";
-        AlertSeverity = MudBlazor.Severity.Success;
+        // ── Persist header + detail to DB, from the exact same inputs the ──
+        // workbook above was built from, so the .xlsx and the DB row can
+        // never disagree with each other.
+        string dbSaveWarning = string.Empty;
+        try
+        {
+            var messageSummaries = UnloadableLogService.SummarizeByMessage(_lastUnlBatchInd, _lastDuplicateCountInd, _lastTotalRecordsInd);
+            var categorySummaries = new List<(string, List<UnloadableLogService.CategoryRejectionSummary>)>
+            {
+                ("Demographic", UnloadableLogService.SummarizeByCategory(_lastUnlBatchInd, "Demographic")),
+                ("Financial", UnloadableLogService.SummarizeByCategory(_lastUnlBatchInd, "Financial")),
+                ("FacilitySubmission", UnloadableLogService.SummarizeByCategory(_lastUnlBatchInd, "FacilitySubmission", _lastDuplicateCountInd))
+            };
+
+            await DataManagementService.SaveUnloadableLogAsync(
+                _lastUnlSubcode, UnlLogSubscriberName, UnlLogInstitutionType,
+                header, messageSummaries, categorySummaries);
+        }
+        catch (Exception ex)
+        {
+            // The .xlsx already downloaded successfully above -- a DB hiccup
+            // here shouldn't block that or throw away the file the person
+            // needs right now. Surface it as a warning instead of losing the
+            // run silently.
+            dbSaveWarning = $" (warning: could not save to log history: {ex.Message})";
+        }
+
+        AlertSeverityMessage = $"Unloadable log generated ({_lastUnlBatchInd.Count} records).{dbSaveWarning}";
+        AlertSeverity = string.IsNullOrEmpty(dbSaveWarning) ? MudBlazor.Severity.Success : MudBlazor.Severity.Warning;
         AlertSeverityVisible = "d-block";
         StateHasChanged();
     }

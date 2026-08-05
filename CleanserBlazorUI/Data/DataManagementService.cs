@@ -772,4 +772,88 @@ public class DataManagementService
         }
         await _context.SaveChangesAsync();
     }
+
+    // ── Unloadable Log: persist header + message/category detail ────────────
+    // Runs alongside GenerateWorkbook, not instead of it -- the .xlsx download
+    // is unchanged. This is what turns each one-off log into a queryable row
+    // in the running history across all subscribers.
+    //
+    // Guarantees a SubscriberProfile row exists (FK requires it) regardless of
+    // whether the "save subscriber info" checkbox was checked -- that checkbox
+    // only governs whether typed name/institution type *overwrite* an existing
+    // profile (handled separately by SaveSubscriberProfileAsync). Here we only
+    // create a minimal profile if one is missing; we never overwrite one that
+    // already exists, since that's not this method's job.
+    public async Task<int> SaveUnloadableLogAsync(
+        string subscriberCode,
+        string subscriberName,
+        string institutionType,
+        UnloadableLogService.UnloadableLogHeader header,
+        List<UnloadableLogService.MessageRejectionSummary> messageSummaries,
+        List<(string TopLevelCategory, List<UnloadableLogService.CategoryRejectionSummary> Items)> categorySummaries)
+    {
+        if (string.IsNullOrWhiteSpace(subscriberCode))
+            throw new ArgumentException("Subscriber code is required to save the Unloadable Log.", nameof(subscriberCode));
+
+        var profile = await _context.SubscriberProfiles
+            .FirstOrDefaultAsync(p => p.SubscriberCode == subscriberCode);
+
+        if (profile == null)
+        {
+            profile = new SubscriberProfile
+            {
+                SubscriberCode = subscriberCode,
+                SubscriberName = subscriberName,
+                InstitutionType = institutionType,
+                LastUpdatedDate = DateTime.Now
+            };
+            _context.SubscriberProfiles.Add(profile);
+            await _context.SaveChangesAsync(); // need profile.Id before the header can reference it
+        }
+
+        var logHeader = new UnloadableLogHeader
+        {
+            SubscriberProfileId = profile.Id,
+            Associate = header.Associate,
+            Filename = header.Filename,
+            NumberOfRecords = header.NumberOfRecords,
+            ReportingPeriod = header.ReportingPeriod,
+            ReportingYear = header.ReportingYear,
+            DataType = header.DataType,
+            Months = header.Months,
+            LogYear = header.LogYear,
+            Comments = string.IsNullOrWhiteSpace(header.Comments) ? null : header.Comments,
+            CreatedDate = DateTime.Now
+        };
+
+        foreach (var m in messageSummaries)
+        {
+            logHeader.MessageDetails.Add(new UnloadableLogMessageDetail
+            {
+                ErrorMessage = m.ErrorMessage,
+                Count = m.Count,
+                Percentage = m.Percentage,
+                Category = m.Category
+            });
+        }
+
+        foreach (var (topLevelCategory, items) in categorySummaries)
+        {
+            foreach (var c in items)
+            {
+                logHeader.CategoryDetails.Add(new UnloadableLogCategoryDetail
+                {
+                    TopLevelCategory = topLevelCategory,
+                    SubCategory = c.SubCategory,
+                    DescriptionOfErrors = c.DescriptionOfErrors,
+                    VolumeAffected = c.VolumeAffected,
+                    Percentage = c.Percentage
+                });
+            }
+        }
+
+        _context.UnloadableLogHeaders.Add(logHeader);
+        await _context.SaveChangesAsync();
+        return logHeader.Id;
+    }
 }
