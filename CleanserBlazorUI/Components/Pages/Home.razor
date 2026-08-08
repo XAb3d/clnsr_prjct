@@ -6244,8 +6244,17 @@
                 // just a sequential-placeholder pattern. Same 2019 cutoff precedent
                 // as the blank-IDs check above -- only enforced on recent
                 // submissions, so historical records aren't retroactively flagged.
-                if (!string.IsNullOrWhiteSpace(bc.Busregnum.Data) &&
-                    bc.Busregnum.Data.All(char.IsDigit) &&
+                //
+                // Strip whitespace/hyphens before judging "all digits" -- without
+                // this, a value that's genuinely all-numeric in substance (e.g.
+                // "123 456 789" or "123-456-789", both common ways a registration
+                // number gets typed) was silently missed, since a raw space or
+                // hyphen isn't itself a digit. Same cleaning approach already used
+                // for the GHA card check.
+                var busregnumCleanedForNumericCheck = new string(
+                    (bc.Busregnum.Data ?? string.Empty).Where(c => !char.IsWhiteSpace(c) && c != '-').ToArray());
+                if (!string.IsNullOrWhiteSpace(busregnumCleanedForNumericCheck) &&
+                    busregnumCleanedForNumericCheck.All(char.IsDigit) &&
                     _date.IsValidFormat && _date.TheDate.Year > 2019)
                 {
                     AddCellError(bc.Busregnum, "BUSREGNUM: ALL-NUMERIC REGISTRATION NUMBER — PROVIDE A VALID REGISTRATION NUMBER");
