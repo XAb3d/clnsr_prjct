@@ -2026,6 +2026,15 @@
             }
         }
 
+        // Named businesses implicated in a confirmed cross-entity collision --
+        // used below to flag every record for that business, not just the
+        // specific row that happened to carry the colliding value. If one
+        // facility's Busregnum/Tinum got mixed up with a different business,
+        // the whole customer file is suspect and worth reviewing together,
+        // not just that one row.
+        var crossBusinessFlaggedNames = new HashSet<string>();
+        var fieldSummaryByName = new Dictionary<string, string>();
+
         foreach (var kvp in byIDValue)
         {
             var entries = kvp.Value;
@@ -2037,13 +2046,35 @@
                 .Count();
             if (distinctCustomerIDs < 2) continue; // same customer -- not a cross-entity conflict
 
-            var distinctNames = entries.Select(e => e.BizName).Distinct().Count();
-            bool sameBusinessConfirmed = distinctNames == 1 && !string.IsNullOrWhiteSpace(entries[0].BizName);
+            var distinctNames = entries.Select(e => e.BizName).Distinct().ToList();
+            bool sameBusinessConfirmed = distinctNames.Count == 1 && !string.IsNullOrWhiteSpace(distinctNames[0]);
             if (sameBusinessConfirmed) continue;
 
             var fieldSummary = string.Join("|", entries.Select(e => e.Field).Distinct().OrderBy(f => f));
+
+            // Flag the specific colliding rows directly -- covers rows with
+            // no Businessname to anchor the wider propagation below.
             foreach (var entry in entries)
                 entry.Rec.CustomerIDBusregnumTinumStatus = $"E:{fieldSummary}";
+
+            foreach (var name in distinctNames.Where(n => !string.IsNullOrWhiteSpace(n)))
+            {
+                crossBusinessFlaggedNames.Add(name);
+                fieldSummaryByName[name] = fieldSummary;
+            }
+        }
+
+        // Propagate: every record for a named business implicated above gets
+        // flagged, even records that individually look clean.
+        foreach (var rec in list)
+        {
+            var bizName = rec.Businessname != null && !string.IsNullOrWhiteSpace(rec.Businessname.Data)
+                ? NormName(rec.Businessname.Data)
+                : string.Empty;
+            if (!string.IsNullOrWhiteSpace(bizName) && crossBusinessFlaggedNames.Contains(bizName))
+            {
+                rec.CustomerIDBusregnumTinumStatus = $"E:{fieldSummaryByName[bizName]}";
+            }
         }
 
         return list;
@@ -6106,6 +6137,16 @@
             bc.Sectorindcode.Data = sectorindcode_subsecindcode[0];
             bc.Subsecindcode.Data = sectorindcode_subsecindcode[1];
 
+            // Expand short forms ("ENT" -> "ENTERPRISE", "VENT" -> "VENTURES",
+            // etc.) BEFORE the keyword-validity check below runs. This used to
+            // happen much later in this same function (after Businessname.Passed
+            // was already set), so a name like "Maxdalin ENT" or "2WiseJay VENT"
+            // was validated against its raw abbreviated form -- which isn't in
+            // the BusinessName keyword whitelist, only its expansion is -- and
+            // got wrongly flagged "Invalid Business Name" every time.
+            bc.Businessname.Data = ConvertBusinessShortFormToLongForm(bc.Businessname.Data);
+            bc.Tradingname.Data = ConvertBusinessShortFormToLongForm(bc.Tradingname.Data);
+
             var bName = FilterBusinessKeywords(bc.Businessname.Data);
             if (string.IsNullOrWhiteSpace(bName))
             {
@@ -6113,7 +6154,7 @@
                 bc.Businessname.Errors = new List<string>() { " Invalid Business Name " };
             }
 
-            var NCG1 = FilterBusinessKeywords(bc.NameOfComGuarantor1.Data);
+            var NCG1 = FilterBusinessKeywords(ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor1.Data));
             if (string.IsNullOrWhiteSpace(NCG1))
             {
                 bc.NameOfComGuarantor1.Data = string.Empty;
@@ -6126,7 +6167,7 @@
 
 
             //NameOfComGuarantor2
-            var NCG2 = FilterBusinessKeywords(bc.NameOfComGuarantor2.Data);
+            var NCG2 = FilterBusinessKeywords(ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor2.Data));
             if (string.IsNullOrWhiteSpace(NCG2))
             {
                 bc.NameOfComGuarantor2.Data = string.Empty;
@@ -6138,7 +6179,7 @@
             }
 
             //NameOfComGuarantor3
-            var NCG3 = FilterBusinessKeywords(bc.NameOfComGuarantor3.Data);
+            var NCG3 = FilterBusinessKeywords(ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor3.Data));
             if (string.IsNullOrWhiteSpace(NCG3))
             {
                 bc.NameOfComGuarantor3.Data = string.Empty;
@@ -6150,7 +6191,7 @@
             }
 
             //NameOfComGuarantor4
-            var NCG4 = FilterBusinessKeywords(bc.NameOfComGuarantor4.Data);
+            var NCG4 = FilterBusinessKeywords(ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor4.Data));
             if (string.IsNullOrWhiteSpace(NCG4))
             {
                 bc.NameOfComGuarantor4.Data = string.Empty;
