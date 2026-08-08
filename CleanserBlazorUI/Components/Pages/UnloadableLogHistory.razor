@@ -36,7 +36,7 @@
     </MudItem>
 </MudGrid>
 
-<MudDataGrid T="UnloadableLogHeader" Items="@logs" Loading="@isLoading"
+<MudDataGrid T="UnloadableLogHeader" Items="@logs" Loading="@isLoading" ReadOnly="false"
              EditMode="DataGridEditMode.Cell" EditTrigger="DataGridEditTrigger.OnRowClick"
              CommittedItemChanges="OnCommittedItemChanges"
              Filterable="true" SortMode="SortMode.Multiple" Bordered="true" Striped="true" Dense="true">
