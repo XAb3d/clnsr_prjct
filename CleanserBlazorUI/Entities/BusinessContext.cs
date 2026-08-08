@@ -3,6 +3,13 @@
 namespace CleanserBlazorUI.Entities;
 public class BusinessContext
 {
+    /// <summary>Set by CheckBusinessIDConsistency. Empty = no issue found.
+    /// "W:&lt;fields&gt;" = Tier 1 -- this record's Busregnum/Prevregnum/Tinum
+    /// value isn't corroborated by any other record for the same business
+    /// (soft signal, doesn't block; surfaced in the Warnings column, col 160,
+    /// via WriteRow&lt;T&gt; in Home.razor). "E:&lt;fields&gt;" = Tier 2 -- the
+    /// same value is shared with a DIFFERENT business name entirely (hard
+    /// signal, blocks to UNL).</summary>
     public string CustomerIDBusregnumTinumStatus { get; set; } = string.Empty;
     /// <summary>Set to "UNL" when the same AccNum+CustomerID appears with a
     /// different DisbursementDate elsewhere in the same submission -- exempted

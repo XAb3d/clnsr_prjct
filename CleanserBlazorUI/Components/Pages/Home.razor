@@ -1905,126 +1905,145 @@
 
         return (processedExcelRecords, duplicatesList, "N/A", "N/A", __matchdata.ToString(), __newdata.ToString(), duplicatesList.Count.ToString());
     }
-    List<BusinessContext> CheckForChangesInCustomerIDBusregnumTinum(List<BusinessContext> list)
+    // ── Business ID consistency check (Busregnum / Prevregnum / Tinum) ────────
+    // Businessname is the identity anchor here -- there's no DOB/NatID
+    // equivalent for businesses, and (like individuals having multiple
+    // CustomerIDs) a single business can legitimately have several
+    // CustomerIDs -- branches registered separately.
+    //
+    // Rather than comparing Busregnum vs Busregnum and Tinum vs Tinum as
+    // independent columns (the old approach), this pools all three
+    // ID-bearing fields per Businessname and judges each record's values by
+    // whether another record for the SAME business corroborates them --
+    // regardless of which of the three columns they're filed under. That
+    // tolerates the common case of Busregnum/Tinum being swapped between two
+    // records of the same business (both values still corroborated, just via
+    // a different field), while still catching a genuinely uncorroborated
+    // value (Tier 1 -- W, soft) and a value that turns out to belong to a
+    // DIFFERENT business entirely (Tier 2 -- E, hard: this is near-certain
+    // evidence of a transposition error, since a real registration number or
+    // TIN can't legitimately belong to two differently-named businesses).
+    List<BusinessContext> CheckBusinessIDConsistency(List<BusinessContext> list)
     {
         if (list == null)
             throw new ArgumentNullException(nameof(list));
 
-        // Trim + case-fold before comparing Busregnum/Tinum -- these are compared
-        // as plain strings, so any invisible whitespace or case difference
-        // between two otherwise-identical values (e.g. from how Excel stored a
-        // cell) would make them count as "different" and force a false conflict,
-        // exactly as reported: a Tinum that looked identical across a group was
-        // still triggering distinctTinums > 1 because it was never normalized.
         string NormReg(string? v) => (v ?? string.Empty).Trim().ToUpperInvariant();
+        string NormName(string? v) => (v ?? string.Empty).Trim().ToUpperInvariant();
 
-        // 1) Group by CustomerID and check for conflicting Busregnum or Tinum
-        var customerGroups = list
-            .Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
-            .GroupBy(r => NormalizeCustomerId(r.CustomerID.Data));
-
-        foreach (var grp in customerGroups)
+        var idSelectors = new List<(string FieldName, Func<BusinessContext, string?> GetValue)>
         {
-            var distinctBusregnums = grp
-                .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
-                .Select(r => NormReg(r.Busregnum.Data))
-                .Distinct()
-                .Count();
+            ("Busregnum",  r => r.Busregnum?.Data),
+            ("Prevregnum", r => r.Prevregnum?.Data),
+            ("Tinum",      r => r.Tinum?.Data),
+        };
 
-            var distinctTinums = grp
-                .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
-                .Select(r => NormReg(r.Tinum.Data))
-                .Distinct()
-                .Count();
+        // ── Tier 1: within-entity consistency, grouped by Businessname ────
+        // Records with no Businessname at all can't be anchored this way and
+        // are skipped here (Tier 2 below still applies to them via their raw
+        // ID values). A business with only one record on file has nothing to
+        // corroborate against, so it's skipped too -- deliberately: without
+        // this guard, every brand-new single-facility business would get
+        // flagged on its very first submission, which isn't the goal.
+        var byBusinessName = list
+            .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
+            .GroupBy(r => NormName(r.Businessname.Data));
 
-            if (distinctBusregnums > 1 || distinctTinums > 1)
+        foreach (var group in byBusinessName)
+        {
+            var records = group.ToList();
+            if (records.Count < 2) continue;
+
+            // value -> number of DISTINCT RECORDS (not field occurrences) in
+            // this business's group that carry it. Counting distinct records
+            // rather than raw occurrences matters: a record that happens to
+            // repeat the same value in two of its own fields shouldn't count
+            // as "corroborating itself".
+            var valueFrequency = new Dictionary<string, int>();
+            foreach (var rec in records)
             {
-                foreach (var rec in grp)
-                    rec.CustomerIDBusregnumTinumStatus = "E";
+                var recDistinctValues = idSelectors
+                    .Select(s => s.GetValue(rec))
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Select(NormReg)
+                    .Distinct();
+                foreach (var val in recDistinctValues)
+                    valueFrequency[val] = valueFrequency.GetValueOrDefault(val) + 1;
+            }
+
+            foreach (var rec in records)
+            {
+                var recordValues = idSelectors
+                    .Select(s => s.GetValue(rec))
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .Select(NormReg)
+                    .Distinct()
+                    .ToList();
+
+                // Uncorroborated = no OTHER record in this business's group
+                // carries this value in any of the three fields.
+                var uncorroborated = recordValues.Where(v => valueFrequency[v] <= 1).ToList();
+                if (uncorroborated.Count == 0) continue;
+
+                var fieldsHit = idSelectors
+                    .Where(s =>
+                    {
+                        var v = s.GetValue(rec);
+                        return !string.IsNullOrWhiteSpace(v) && uncorroborated.Contains(NormReg(v));
+                    })
+                    .Select(s => s.FieldName);
+
+                rec.CustomerIDBusregnumTinumStatus = $"W:{string.Join("|", fieldsHit)}";
             }
         }
 
-        // 2) Group by Busregnum and check for conflicting CustomerID or Tinum
-        var busregGroups = list
-            .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
-            .GroupBy(r => NormReg(r.Busregnum.Data));
+        // ── Tier 2: cross-entity duplicate check, file-wide ────────────────
+        // Pool every Busregnum/Prevregnum/Tinum value across the WHOLE file
+        // and see how many distinct CustomerIDs and Businessnames share it.
+        // Different CustomerIDs sharing one value can legitimately be the
+        // same business registered per branch -- exempted ONLY when every
+        // record sharing that value agrees on exactly one Businessname.
+        // Anything else (different names, or missing names so sameness can't
+        // be confirmed) stays flagged -- same conservative fallback the old
+        // per-column version used, just applied to the pooled value set.
+        // This tier overrides any Tier 1 "W" already set: E takes priority.
+        var byIDValue = new Dictionary<string, List<(string BizName, string Field, BusinessContext Rec)>>();
 
-        foreach (var grp in busregGroups)
+        foreach (var rec in list)
         {
-            var distinctCustomerIDs = grp
-                .Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
-                .Select(r => NormalizeCustomerId(r.CustomerID.Data))
-                .Distinct()
-                .Count();
-
-            var distinctTinums = grp
-                .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
-                .Select(r => NormReg(r.Tinum.Data))
-                .Distinct()
-                .Count();
-
-            // Different CustomerIDs sharing the same Busregnum can legitimately
-            // happen -- the same business registered separately per branch,
-            // each with its own CustomerID. Registration date isn't reliable
-            // enough to verify against (known inconsistencies), so fall back to
-            // an exact Businessname match instead: same name across the group
-            // -> legitimate, don't block. Different names, or no names to check
-            // at all -> can't confirm it's the same business, stay conservative.
-            bool customerIdConflict = distinctCustomerIDs > 1;
-            if (customerIdConflict)
+            foreach (var (fieldName, getValue) in idSelectors)
             {
-                var distinctBusinessNames = grp
-                    .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
-                    .Select(r => NormReg(r.Businessname.Data))
-                    .Distinct()
-                    .Count();
-                customerIdConflict = distinctBusinessNames != 1;
-            }
+                var val = getValue(rec);
+                if (string.IsNullOrWhiteSpace(val)) continue;
+                var key = NormReg(val);
+                if (!byIDValue.TryGetValue(key, out var bucket))
+                { bucket = new List<(string, string, BusinessContext)>(); byIDValue[key] = bucket; }
 
-            if (customerIdConflict || distinctTinums > 1)
-            {
-                foreach (var rec in grp)
-                    rec.CustomerIDBusregnumTinumStatus = "E";
+                var bizName = rec.Businessname != null && !string.IsNullOrWhiteSpace(rec.Businessname.Data)
+                    ? NormName(rec.Businessname.Data)
+                    : string.Empty;
+                bucket.Add((bizName, fieldName, rec));
             }
         }
 
-        // 3) Group by Tinum and check for conflicting CustomerID or Busregnum
-        var tinumGroups = list
-            .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
-            .GroupBy(r => NormReg(r.Tinum.Data));
-
-        foreach (var grp in tinumGroups)
+        foreach (var kvp in byIDValue)
         {
-            var distinctCustomerIDs = grp
-                .Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
-                .Select(r => NormalizeCustomerId(r.CustomerID.Data))
+            var entries = kvp.Value;
+
+            var distinctCustomerIDs = entries
+                .Select(e => NormalizeCustomerId(e.Rec.CustomerID?.Data))
+                .Where(c => !string.IsNullOrWhiteSpace(c))
                 .Distinct()
                 .Count();
+            if (distinctCustomerIDs < 2) continue; // same customer -- not a cross-entity conflict
 
-            var distinctBusregnums = grp
-                .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
-                .Select(r => NormReg(r.Busregnum.Data))
-                .Distinct()
-                .Count();
+            var distinctNames = entries.Select(e => e.BizName).Distinct().Count();
+            bool sameBusinessConfirmed = distinctNames == 1 && !string.IsNullOrWhiteSpace(entries[0].BizName);
+            if (sameBusinessConfirmed) continue;
 
-            // Same reasoning as section 2 -- same Tinum, different CustomerIDs,
-            // can legitimately be the same business registered per branch.
-            bool customerIdConflict = distinctCustomerIDs > 1;
-            if (customerIdConflict)
-            {
-                var distinctBusinessNames = grp
-                    .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
-                    .Select(r => NormReg(r.Businessname.Data))
-                    .Distinct()
-                    .Count();
-                customerIdConflict = distinctBusinessNames != 1;
-            }
-
-            if (customerIdConflict || distinctBusregnums > 1)
-            {
-                foreach (var rec in grp)
-                    rec.CustomerIDBusregnumTinumStatus = "E";
-            }
+            var fieldSummary = string.Join("|", entries.Select(e => e.Field).Distinct().OrderBy(f => f));
+            foreach (var entry in entries)
+                entry.Rec.CustomerIDBusregnumTinumStatus = $"E:{fieldSummary}";
         }
 
         return list;
@@ -3068,12 +3087,12 @@
     // ── Phase 4 (BUS): same technique as the IND version above ──────────────
     // One virtual BusinessContext per CustomerID, built from whichever
     // BusinessRef row for that customer was most recently updated. Injected
-    // into the same list CheckForChangesInCustomerIDBusregnumTinum already
-    // processes -- its existing byCustomerID grouping (section 1) naturally
-    // compares a real incoming record's Businessname/Busregnum/Tinum against
-    // its own reference history the same way it already compares two records
-    // within one file. Caller must remove these again via the returned
-    // virtualRecords list (e.g. .Except()) before anything else sees them.
+    // into the same list CheckBusinessIDConsistency already processes -- its
+    // Tier 1 Businessname grouping naturally compares a real incoming
+    // record's Businessname/Busregnum/Tinum against its own reference
+    // history the same way it already compares two records within one file.
+    // Caller must remove these again via the returned virtualRecords list
+    // (e.g. .Except()) before anything else sees them.
     List<BusinessContext> BuildReferenceVirtualRecordsBus(List<BusinessContext> incoming, List<BusinessRef> fromDatabase, out Dictionary<string, string> previousNameByCustomer)
     {
         var virtualRecords = new List<BusinessContext>();
@@ -3628,7 +3647,7 @@
                         // before anything else sees them.
                         var referenceVirtualsBus = BuildReferenceVirtualRecordsBus(mainMatcherTransformer, RefData, out _);
                         var forCrossChecksBus = mainMatcherTransformer.Concat(referenceVirtualsBus).ToList();
-                        forCrossChecksBus = CheckForChangesInCustomerIDBusregnumTinum(forCrossChecksBus);
+                        forCrossChecksBus = CheckBusinessIDConsistency(forCrossChecksBus);
                         var mainMatcherTransformer_temp = forCrossChecksBus.Except(referenceVirtualsBus).ToList();
                         mainMatcherTransformer = mainMatcherTransformer_temp;
                         correctDateOfBirth = _correctDateOfBirth.ToString();
@@ -4556,6 +4575,14 @@
                 if (typeof(T) == typeof(BusinessContext))
                 {
                     WriteHeaders(ws, wsu, wsd, wsc, SpreadSheetHeadersData.Business, 159);
+                    // Add WARNING column header at col 160 for BUS sheets --
+                    // same pattern as the IND block below (col 180). Surfaces
+                    // CheckBusinessIDConsistency's Tier 1 ("W:") findings,
+                    // which previously had nowhere to appear in the output.
+                    ws.Cell(1, 160).Value  = "--------------- Warnings ---------------";
+                    wsu.Cell(1, 160).Value = "--------------- Warnings ---------------";
+                    wsd.Cell(1, 160).Value = "--------------- Warnings ---------------";
+                    wsc.Cell(1, 160).Value = "--------------- Warnings ---------------";
                     WriteData(context.OfType<BusinessContext>().ToList(), context_duplicate.OfType<BusinessContext>().ToList(), closedRows.OfType<BusinessContext>().ToList(), ws, wsu, wsd, wsc);
                 }
                 else if (typeof(T) == typeof(IndividualContext))
@@ -5320,6 +5347,21 @@
                     };
                 string allErrors = stringHelper.JoinErrors(cellProperties.Where(cell => cell != null && cell.Errors != null).SelectMany(cell => cell!.Errors!));
                 ws.Cell(rowIndex, 159).Value = allErrors;
+
+                // ── Warnings column (col 160) ──────────────────────────────
+                // Surfaces CheckBusinessIDConsistency's Tier 1 ("W:") finding
+                // -- this record's own Busregnum/Prevregnum/Tinum value isn't
+                // corroborated by any other record for the same business.
+                // Doesn't block (Tier 2 "E:" handles the hard-block case via
+                // AddCellError, which lands in allErrors above), just a note
+                // for review. Runs for both CLEAN and UNL since this block
+                // isn't isSlean-gated.
+                if (businessRow.CustomerIDBusregnumTinumStatus?.StartsWith("W:") == true)
+                {
+                    var fieldNote = businessRow.CustomerIDBusregnumTinumStatus.Substring(2);
+                    ws.Cell(rowIndex, 160).Value =
+                        $"BUSINESS REG NUMBER/TIN NOT CORROBORATED BY ANY OTHER RECORD FOR THIS BUSINESS ({fieldNote})";
+                }
             }
         }
         else if (row is IndividualContext individualRow)
@@ -6492,9 +6534,17 @@
                 bc.CurBal.Errors = new List<string>() { "CURRENT BALANCE SHOULD NOT BE EMPTY" };
             }
 
-            if (!string.IsNullOrWhiteSpace(bc.CustomerIDBusregnumTinumStatus))
+            // Only Tier 2 ("E:" -- same reg number/TIN confirmed under a
+            // different business name) blocks to UNL. Tier 1 ("W:" -- this
+            // record's own reg number/TIN isn't corroborated by any other
+            // record for the same business) is a softer signal that needs
+            // human review, not an automatic reject -- see
+            // CheckBusinessIDConsistency. Surfaced in the Warnings column
+            // (col 160) in WriteRow<T> rather than blocking here.
+            if (bc.CustomerIDBusregnumTinumStatus?.StartsWith("E:") == true)
             {
-                AddCellError(bc.CustomerID, "SAME BUSINESS REGISTRATION NUMBER OR TIN NUMBERS FOR DIFFERENT CUSTOMERS");
+                var fieldNote = bc.CustomerIDBusregnumTinumStatus.Substring(2);
+                AddCellError(bc.CustomerID, $"SAME BUSINESS REGISTRATION NUMBER OR TIN SHARED WITH A DIFFERENT BUSINESS NAME ({fieldNote})");
             }
 
             if (!string.IsNullOrWhiteSpace(bc.DisbursementDateMisMatch))
