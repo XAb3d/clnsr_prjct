@@ -45,6 +45,12 @@ builder.WebHost.ConfigureKestrel(options =>
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+// Detailed circuit errors in dev only -- surfaces the real exception message
+// client-side too, instead of just "circuit terminated" with no detail.
+builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(options =>
+{
+    options.DetailedErrors = builder.Environment.IsDevelopment();
+});
 builder.Services.AddMudServices();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IdentityUserAccessor>();
