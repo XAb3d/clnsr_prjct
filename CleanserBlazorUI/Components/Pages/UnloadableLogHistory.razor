@@ -1,0 +1,142 @@
+@page "/unloadable-log-history"
+@rendermode InteractiveServer
+@inject DataManagementService DataManagementService
+
+@attribute [Authorize(Roles = "admin")]
+
+<MudAlert Class="@AlertSeverityVisible" Severity="@AlertSeverity">@AlertSeverityMessage</MudAlert>
+
+<MudText Typo="Typo.h5" Class="mb-4">Unloadable Log History</MudText>
+
+<MudGrid Class="mb-4">
+    <MudItem xs="12" sm="4" md="3">
+        <MudSelect T="string" Label="Year" @bind-Value="selectedYear" @bind-Value:after="ApplyFiltersAsync" Clearable="true">
+            @foreach (var year in availableYears)
+            {
+                <MudSelectItem T="string" Value="@year">@year</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" sm="4" md="3">
+        <MudSelect T="string" Label="File Type" @bind-Value="selectedDataType" @bind-Value:after="ApplyFiltersAsync" Clearable="true">
+            <MudSelectItem T="string" Value="@("IND")">Individual</MudSelectItem>
+            <MudSelectItem T="string" Value="@("BUS")">Business</MudSelectItem>
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" sm="4" md="4">
+        <MudSelect T="int?" Label="Subscriber" @bind-Value="selectedSubscriberId" @bind-Value:after="ApplyFiltersAsync" Clearable="true">
+            @foreach (var profile in subscriberProfiles)
+            {
+                <MudSelectItem T="int?" Value="@profile.Id">@profile.SubscriberName (@profile.SubscriberCode)</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" sm="12" md="2" Class="d-flex align-center">
+        <MudButton Variant="Variant.Outlined" FullWidth="true" OnClick="ClearFiltersAsync">Clear Filters</MudButton>
+    </MudItem>
+</MudGrid>
+
+<MudDataGrid T="UnloadableLogHeader" Items="@logs" Loading="@isLoading"
+             EditMode="DataGridEditMode.Cell" EditTrigger="DataGridEditTrigger.OnRowClick"
+             CommittedItemChanges="OnCommittedItemChanges"
+             Filterable="true" SortMode="SortMode.Multiple" Bordered="true" Striped="true" Dense="true">
+    <Columns>
+        <PropertyColumn Property="x => x.SubscriberProfile!.SubscriberName" Title="Subscriber" ReadOnly="true" />
+        <PropertyColumn Property="x => x.SubscriberProfile!.SubscriberCode" Title="Subcode" ReadOnly="true" />
+        <PropertyColumn Property="x => x.DataType" Title="Type" ReadOnly="true" />
+        <PropertyColumn Property="x => x.Filename" Title="Filename" ReadOnly="true" />
+        <PropertyColumn Property="x => x.ReportingPeriod" Title="Reporting Period" ReadOnly="true" />
+        <PropertyColumn Property="x => x.NumberOfRecords" Title="# UNL Records" ReadOnly="true" />
+        <PropertyColumn Property="x => x.CreatedDate" Title="Generated On" ReadOnly="true" Format="dd MMM yyyy HH:mm" />
+
+        <PropertyColumn Property="x => x.DateEmailed" Title="Date Emailed">
+            <CellTemplate>
+                @(context.Item.DateEmailed?.ToString("dd MMM yyyy") ?? "—")
+            </CellTemplate>
+            <EditTemplate>
+                <MudDatePicker @bind-Date="context.Item.DateEmailed" Editable="true" />
+            </EditTemplate>
+        </PropertyColumn>
+
+        <PropertyColumn Property="x => x.DateFixed" Title="Date Fixed">
+            <CellTemplate>
+                @(context.Item.DateFixed?.ToString("dd MMM yyyy") ?? "—")
+            </CellTemplate>
+            <EditTemplate>
+                <MudDatePicker @bind-Date="context.Item.DateFixed" Editable="true" />
+            </EditTemplate>
+        </PropertyColumn>
+
+        <PropertyColumn Property="x => x.Comments" Title="Comments">
+            <EditTemplate>
+                <MudTextField @bind-Value="context.Item.Comments" Lines="2" />
+            </EditTemplate>
+        </PropertyColumn>
+    </Columns>
+    <PagerContent>
+        <MudDataGridPager T="UnloadableLogHeader" PageSizeOptions="new[] { 25, 50, 100 }" />
+    </PagerContent>
+    <NoRecordsContent>
+        <MudText>No log entries match the current filters.</MudText>
+    </NoRecordsContent>
+</MudDataGrid>
+
+@code {
+    private MudBlazor.Severity AlertSeverity { get; set; } = MudBlazor.Severity.Success;
+    private string AlertSeverityVisible = "d-none";
+    private string AlertSeverityMessage = string.Empty;
+
+    private List<UnloadableLogHeader> logs = new();
+    private List<SubscriberProfile> subscriberProfiles = new();
+    private List<string> availableYears = new();
+    private bool isLoading = true;
+
+    private string? selectedYear;
+    private string? selectedDataType;
+    private int? selectedSubscriberId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        subscriberProfiles = await DataManagementService.GetAllSubscriberProfilesAsync();
+        availableYears = await DataManagementService.GetUnloadableLogYearsAsync();
+        // Default to the current year so the grid isn't dumping every run
+        // across every year on first load -- clear it via "Clear Filters"
+        // to see everything.
+        selectedYear = DateTime.Now.Year.ToString();
+        await ApplyFiltersAsync();
+    }
+
+    private async Task ApplyFiltersAsync()
+    {
+        isLoading = true;
+        StateHasChanged();
+        logs = await DataManagementService.GetUnloadableLogHeadersAsync(selectedYear, selectedDataType, selectedSubscriberId);
+        isLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task ClearFiltersAsync()
+    {
+        selectedYear = null;
+        selectedDataType = null;
+        selectedSubscriberId = null;
+        await ApplyFiltersAsync();
+    }
+
+    private async Task OnCommittedItemChanges(UnloadableLogHeader item)
+    {
+        try
+        {
+            await DataManagementService.UpdateUnloadableLogAsync(item);
+            AlertSeverityMessage = $"Saved changes for {item.Filename}.";
+            AlertSeverity = MudBlazor.Severity.Success;
+        }
+        catch (Exception ex)
+        {
+            AlertSeverityMessage = $"Could not save changes: {ex.Message}";
+            AlertSeverity = MudBlazor.Severity.Error;
+        }
+        AlertSeverityVisible = "d-block";
+        StateHasChanged();
+    }
+}

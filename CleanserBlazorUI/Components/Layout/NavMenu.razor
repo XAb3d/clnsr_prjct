@@ -9,6 +9,13 @@
     <div class="container-fluid">
         <a class="navbar-brand" href="refdata">refdata</a>
     </div>
+    <AuthorizeView Roles="admin">
+        <Authorized>
+            <div class="container-fluid">
+                <a class="navbar-brand" href="unloadable-log-history">unloadable log history</a>
+            </div>
+        </Authorized>
+    </AuthorizeView>
 </div>
 
 <input type="checkbox" title="Navigation menu" class="navbar-toggler" />
