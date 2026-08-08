@@ -202,9 +202,9 @@ public class BusinessDataTransformer
         {
             data = "FOREIGN / EXTERNAL COMPANY";
         }
-        else if (data == "H" || data == "CONSULTANCYFIRMS" || data == "CONSULTANCY" || data == "PROFESSIONALBODIES" || data == "PROFESSIONAL" || data == "CONSULTANCYFIRMS/PROFESSIONALBODIES")
+        else if (data == "H" || data == "CONSULTANCY FIRMS" || data == "CONSULTANCY" || data == "PROFESSIONAL BODIES" || data == "PROFESSIONAL" || data == "CONSULTANCY FIRMS/PROFESSIONAL BODIES")
         {
-            data = "CONSULTANCYFIRMS/PROFESSIONALBODIES";
+            data = "CONSULTANCY FIRMS/PROFESSIONAL BODIES";
         }
         else if (data == "J" || data == "SOCIALORGANIZATION" || data == "SOCIAL")
         {
