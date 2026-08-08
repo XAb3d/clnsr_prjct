@@ -10,7 +10,7 @@
 
 <MudGrid Class="mb-4">
     <MudItem xs="12" sm="4" md="3">
-        <MudSelect T="string" Label="Year" @bind-Value="selectedYear" @bind-Value:after="ApplyFiltersAsync" Clearable="true">
+        <MudSelect T="string" Label="Year" Value="selectedYear" ValueChanged="OnYearChanged" Clearable="true">
             @foreach (var year in availableYears)
             {
                 <MudSelectItem T="string" Value="@year">@year</MudSelectItem>
@@ -18,13 +18,13 @@
         </MudSelect>
     </MudItem>
     <MudItem xs="12" sm="4" md="3">
-        <MudSelect T="string" Label="File Type" @bind-Value="selectedDataType" @bind-Value:after="ApplyFiltersAsync" Clearable="true">
+        <MudSelect T="string" Label="File Type" Value="selectedDataType" ValueChanged="OnDataTypeChanged" Clearable="true">
             <MudSelectItem T="string" Value="@("IND")">Individual</MudSelectItem>
             <MudSelectItem T="string" Value="@("BUS")">Business</MudSelectItem>
         </MudSelect>
     </MudItem>
     <MudItem xs="12" sm="4" md="4">
-        <MudSelect T="int?" Label="Subscriber" @bind-Value="selectedSubscriberId" @bind-Value:after="ApplyFiltersAsync" Clearable="true">
+        <MudSelect T="int?" Label="Subscriber" Value="selectedSubscriberId" ValueChanged="OnSubscriberChanged" Clearable="true">
             @foreach (var profile in subscriberProfiles)
             {
                 <MudSelectItem T="int?" Value="@profile.Id">@profile.SubscriberName (@profile.SubscriberCode)</MudSelectItem>
@@ -103,6 +103,24 @@
         // across every year on first load -- clear it via "Clear Filters"
         // to see everything.
         selectedYear = DateTime.Now.Year.ToString();
+        await ApplyFiltersAsync();
+    }
+
+    private async Task OnYearChanged(string value)
+    {
+        selectedYear = value;
+        await ApplyFiltersAsync();
+    }
+
+    private async Task OnDataTypeChanged(string value)
+    {
+        selectedDataType = value;
+        await ApplyFiltersAsync();
+    }
+
+    private async Task OnSubscriberChanged(int? value)
+    {
+        selectedSubscriberId = value;
         await ApplyFiltersAsync();
     }
 
