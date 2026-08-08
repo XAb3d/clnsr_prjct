@@ -41,13 +41,32 @@
              CommittedItemChanges="OnCommittedItemChanges"
              Filterable="true" SortMode="SortMode.Multiple" Bordered="true" Striped="true" Dense="true">
     <Columns>
-        <PropertyColumn Property="x => x.SubscriberProfile!.SubscriberName" Title="Subscriber" ReadOnly="true" />
-        <PropertyColumn Property="x => x.SubscriberProfile!.SubscriberCode" Title="Subcode" ReadOnly="true" />
-        <PropertyColumn Property="x => x.DataType" Title="Type" ReadOnly="true" />
-        <PropertyColumn Property="x => x.Filename" Title="Filename" ReadOnly="true" />
-        <PropertyColumn Property="x => x.ReportingPeriod" Title="Reporting Period" ReadOnly="true" />
-        <PropertyColumn Property="x => x.NumberOfRecords" Title="# UNL Records" ReadOnly="true" />
-        <PropertyColumn Property="x => x.CreatedDate" Title="Generated On" ReadOnly="true" Format="dd MMM yyyy HH:mm" />
+        <PropertyColumn Property="x => x.SubscriberProfile!.SubscriberName" Title="Subscriber" ReadOnly="true">
+            <CellTemplate>@context.Item.SubscriberProfile?.SubscriberName</CellTemplate>
+        </PropertyColumn>
+        <PropertyColumn Property="x => x.SubscriberProfile!.SubscriberCode" Title="Subcode" ReadOnly="true">
+            <CellTemplate>@context.Item.SubscriberProfile?.SubscriberCode</CellTemplate>
+        </PropertyColumn>
+        <PropertyColumn Property="x => x.DataType" Title="Type" ReadOnly="true">
+            <CellTemplate>@context.Item.DataType</CellTemplate>
+        </PropertyColumn>
+        <PropertyColumn Property="x => x.Filename" Title="Filename" ReadOnly="true">
+            <CellTemplate>@context.Item.Filename</CellTemplate>
+        </PropertyColumn>
+        <PropertyColumn Property="x => x.ReportingPeriod" Title="Reporting Period" ReadOnly="true">
+            <CellTemplate>@context.Item.ReportingPeriod</CellTemplate>
+        </PropertyColumn>
+        @* Explicit CellTemplate-only (no EditTemplate) here specifically because
+           ReadOnly="true" alone was not enough to stop this int column from
+           rendering a numeric up/down spinner and saving on every click --
+           NumberOfRecords is an immutable snapshot of the run and should never
+           be user-editable. *@
+        <PropertyColumn Property="x => x.NumberOfRecords" Title="# UNL Records" ReadOnly="true">
+            <CellTemplate>@context.Item.NumberOfRecords</CellTemplate>
+        </PropertyColumn>
+        <PropertyColumn Property="x => x.CreatedDate" Title="Generated On" ReadOnly="true">
+            <CellTemplate>@context.Item.CreatedDate.ToString("dd MMM yyyy HH:mm")</CellTemplate>
+        </PropertyColumn>
 
         <PropertyColumn Property="x => x.DateEmailed" Title="Date Emailed">
             <CellTemplate>
