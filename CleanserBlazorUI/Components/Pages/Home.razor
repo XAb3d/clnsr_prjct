@@ -3510,7 +3510,7 @@
                         var unlExistingProfile = await DataManagementService.GetSubscriberProfileAsync(_lastUnlSubcode);
                         UnlLogSubscriberName = unlExistingProfile?.SubscriberName ?? string.Empty;
                         UnlLogInstitutionType = unlExistingProfile?.InstitutionType ?? string.Empty;
-                        unlLogPanelView = (_duplicatesInd != null && _duplicatesInd.Count > 0) ? "d-block" : "d-none";
+                        unlLogPanelView = _lastUnlBatchInd.Count > 0 ? "d-block" : "d-none";
 
                         // Only persist/route records that actually passed every check.
                         // mainMatcherTransformer (aka "allRecords" from the matcher)
@@ -3658,7 +3658,7 @@
                         var unlExistingProfileBus = await DataManagementService.GetSubscriberProfileAsync(_lastUnlSubcode);
                         UnlLogSubscriberName = unlExistingProfileBus?.SubscriberName ?? string.Empty;
                         UnlLogInstitutionType = unlExistingProfileBus?.InstitutionType ?? string.Empty;
-                        unlLogPanelView = (_duplicatesInd != null && _duplicatesInd.Count > 0) ? "d-block" : "d-none";
+                        unlLogPanelView = _lastUnlBatchBus.Count > 0 ? "d-block" : "d-none";
 
                         var trulyCleanBus = mainMatcherTransformer.Where(r => ISCleaned(r)).ToList();
                         if (CleanOnlyOrCleanAndReference == false)
