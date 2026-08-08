@@ -857,4 +857,57 @@ public class DataManagementService
         await _context.SaveChangesAsync();
         return logHeader.Id;
     }
+
+    // ── Unloadable Log: browse/filter for the history grid ──────────────────
+    // ChangeTracker.Clear() up front: this page's filters can re-run this
+    // query multiple times in the same Blazor Server circuit (same scoped
+    // DbContext), and without clearing, re-fetching a header already tracked
+    // from a prior search throws "instance ... already being tracked" --
+    // the same class of bug already hit once in the upload flow.
+    public async Task<List<UnloadableLogHeader>> GetUnloadableLogHeadersAsync(string? logYear = null, string? dataType = null, int? subscriberProfileId = null)
+    {
+        _context.ChangeTracker.Clear();
+
+        var query = _context.UnloadableLogHeaders
+            .Include(h => h.SubscriberProfile)
+            .AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(logYear))
+            query = query.Where(h => h.LogYear == logYear);
+        if (!string.IsNullOrWhiteSpace(dataType))
+            query = query.Where(h => h.DataType == dataType);
+        if (subscriberProfileId.HasValue)
+            query = query.Where(h => h.SubscriberProfileId == subscriberProfileId.Value);
+
+        return await query.OrderByDescending(h => h.CreatedDate).ToListAsync();
+    }
+
+    public async Task<List<SubscriberProfile>> GetAllSubscriberProfilesAsync()
+    {
+        return await _context.SubscriberProfiles.OrderBy(p => p.SubscriberName).ToListAsync();
+    }
+
+    public async Task<List<string>> GetUnloadableLogYearsAsync()
+    {
+        return await _context.UnloadableLogHeaders
+            .Select(h => h.LogYear)
+            .Distinct()
+            .OrderByDescending(y => y)
+            .ToListAsync();
+    }
+
+    // Only DateEmailed/DateFixed/Comments are ever updated here -- everything
+    // else on the header is a snapshot of what happened at generation time
+    // and isn't meant to change after the fact.
+    public async Task UpdateUnloadableLogAsync(UnloadableLogHeader updated)
+    {
+        var existing = await _context.UnloadableLogHeaders
+            .FirstOrDefaultAsync(h => h.Id == updated.Id);
+        if (existing == null) return;
+
+        existing.DateEmailed = updated.DateEmailed;
+        existing.DateFixed = updated.DateFixed;
+        existing.Comments = string.IsNullOrWhiteSpace(updated.Comments) ? null : updated.Comments;
+        await _context.SaveChangesAsync();
+    }
 }
