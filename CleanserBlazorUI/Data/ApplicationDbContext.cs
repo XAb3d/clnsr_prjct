@@ -12,6 +12,10 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<UnloadableLogHeader> UnloadableLogHeaders { get; set; }
     public DbSet<UnloadableLogMessageDetail> UnloadableLogMessageDetails { get; set; }
     public DbSet<UnloadableLogCategoryDetail> UnloadableLogCategoryDetails { get; set; }
+    // Moved from a separate, unmigrated "blazor-CleanserAppDB" database
+    // (raw ADO.NET against [Subscriber].[Subscribers], no schema tracking)
+    // into this EF-managed one. See GetShortCodeFromSubscribeIDAsync.
+    public DbSet<SubscribeContext> SubscriberShortCodes { get; set; }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

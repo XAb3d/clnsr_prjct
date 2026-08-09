@@ -1,7 +1,6 @@
 {
   "ConnectionStrings": {
-    "DefaultConnection": "server=.;Persist Security Info=True;User ID=sa;Password=P@ssw0rd;Multiple Active Result Sets=False;Database=NewCleaserDB;Encrypt=True;Trust Server Certificate=True;Command Timeout=0",
-    "SubscriberConnection": "server=.;Persist Security Info=True;User ID=sa;Password=P@ssw0rd;Multiple Active Result Sets=False;Database=blazor-CleanserAppDB;Encrypt=True;Trust Server Certificate=True;Command Timeout=0"
+    "DefaultConnection": "server=.;Persist Security Info=True;User ID=sa;Password=P@ssw0rd;Multiple Active Result Sets=False;Database=NewCleaserDB;Encrypt=True;Trust Server Certificate=True;Command Timeout=0"
   },
   "Logging": {
     "LogLevel": {
@@ -20,3 +19,6 @@
   "AllowedHosts": "*"
 }
 //rename "example.appsettings.json" to  "appsettings.json"
+// SubscriberConnection removed: subscriber short codes now live in
+// SubscriberShortCodes (ApplicationDbContext/DefaultConnection), migrated
+// off the old separate "blazor-CleanserAppDB" database.

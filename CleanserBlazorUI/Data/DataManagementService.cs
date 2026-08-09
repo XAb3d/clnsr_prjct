@@ -1,5 +1,4 @@
 ﻿using EFCore.BulkExtensions;
-using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using CleanserBlazorUI.Services;
 
@@ -8,11 +7,9 @@ public class DataManagementService
 {
     private string text_value_seperator { get; set; } = "&&&___&&&";
     private readonly ApplicationDbContext _context;
-    private readonly IConfiguration _configuration;
-    public DataManagementService(ApplicationDbContext context, IConfiguration configuration)
+    public DataManagementService(ApplicationDbContext context)
     {
         _context = context;
-        _configuration = configuration;
     }
     // Returns all reference records for this subscriber.
     // The reference always holds the cumulative known state — every unique
@@ -478,50 +475,25 @@ public class DataManagementService
         string specificShortCode = shortCodes.FirstOrDefault(s => s == _shortname) ?? string.Empty;
         return specificShortCode;
     }
+    // Reads from the same EF-managed database as everything else now
+    // (see ApplicationDbContext.SubscriberShortCodes) -- previously raw
+    // ADO.NET against a separate, unmigrated "blazor-CleanserAppDB".
+    // Method name/signature/return shape unchanged so every caller
+    // (GetSubscriberUserInfosShotCode, GetSubscriberShortCode, etc.)
+    // keeps working without modification.
     public async Task<List<SubscribeContext>> GetShortCodeFromSubscribeIDAsync()
     {
-        List<SubscribeContext> subscribeContexts = new();
-        SubscribeContext subscribeContext;
-
-        string connectionString = _configuration.GetConnectionString("SubscriberConnection")
-            ?? throw new InvalidOperationException("Connection string 'SubscriberConnection' not found.");
-
-        // Step 3: Create a SqlConnection object
-        using (SqlConnection connection = new SqlConnection(connectionString))
+        try
         {
-            try
-            {
-                // Step 4: Open the connection asynchronously
-                await connection.OpenAsync();
-
-                // Step 5: Define the SQL query
-                string query = "SELECT * FROM [Subscriber].[Subscribers]"; // Fully qualified table name
-
-                // Step 6: Execute the query asynchronously
-                using (SqlCommand command = new SqlCommand(query, connection))
-                {
-                    using (SqlDataReader reader = await command.ExecuteReaderAsync())
-                    {
-                        // Step 7: Process the results
-                        while (await reader.ReadAsync())
-                        {
-                            // Assuming the table has a column named "ShortName"
-                            subscribeContext = new SubscribeContext
-                            {
-                                ShortName = reader.GetString(reader.GetOrdinal("ShortName")),
-                                SubCategoryCode = reader.GetString(reader.GetOrdinal("SubCategoryCode"))
-                            };
-                            subscribeContexts.Add(subscribeContext);
-                        }
-                    }
-                }
-            }
-            catch (Exception)
-            {
-            }
+            return await _context.SubscriberShortCodes.ToListAsync();
         }
-
-        return subscribeContexts;
+        catch (Exception)
+        {
+            // Matches the original method's behavior: swallow and return
+            // empty rather than surface an exception to callers that were
+            // never written expecting one from this method.
+            return new List<SubscribeContext>();
+        }
     }
     public async Task<List<string>> GetSubscriberUserInfosShotCode()
     {
