@@ -1,8 +1,8 @@
 # Cleanser App (`clnsr_prjct`)
 
-**XDS Credit Bureau — Data Cleanser Tool**
+**AB3 Credit Bureau — Data Cleanser Tool**
 
-A C# / ASP.NET Blazor (.NET 9) application that validates, normalises, and prepares financial and credit records submitted by subscriber institutions before loading into the XDS credit bureau system.
+A C# / ASP.NET Blazor (.NET 9) application that validates, normalises, and prepares financial and credit records submitted by subscriber institutions before loading into the AB3 credit bureau system.
 
 ---
 
@@ -147,4 +147,4 @@ dotnet tool install --global dotnet-ef
 
 ---
 
-*Maintained by XDS Data Operations.*
+*Maintained by AB3 Data Operations.*
