@@ -1,104 +1,215 @@
 @page "/unloadable-log-history"
 @rendermode InteractiveServer
+@using MudBlazor.Charts
 @inject DataManagementService DataManagementService
 
 @attribute [Authorize(Roles = "admin")]
 
 <MudAlert Class="@AlertSeverityVisible" Severity="@AlertSeverity">@AlertSeverityMessage</MudAlert>
 
-<MudText Typo="Typo.h5" Class="mb-4">Unloadable Log History</MudText>
+<MudText Typo="Typo.h5" Class="mb-4">Unloadable Log</MudText>
 
-<MudGrid Class="mb-4">
-    <MudItem xs="12" sm="4" md="3">
-        <MudSelect T="string" Label="Year" Value="selectedYear" ValueChanged="OnYearChanged" Clearable="true">
-            @foreach (var year in availableYears)
-            {
-                <MudSelectItem T="string" Value="@year">@year</MudSelectItem>
-            }
-        </MudSelect>
-    </MudItem>
-    <MudItem xs="12" sm="4" md="3">
-        <MudSelect T="string" Label="File Type" Value="selectedDataType" ValueChanged="OnDataTypeChanged" Clearable="true">
-            <MudSelectItem T="string" Value="@("IND")">Individual</MudSelectItem>
-            <MudSelectItem T="string" Value="@("BUS")">Business</MudSelectItem>
-        </MudSelect>
-    </MudItem>
-    <MudItem xs="12" sm="4" md="4">
-        <MudSelect T="int?" Label="Subscriber" Value="selectedSubscriberId" ValueChanged="OnSubscriberChanged" Clearable="true">
-            @foreach (var profile in subscriberProfiles)
-            {
-                <MudSelectItem T="int?" Value="@profile.Id">@profile.SubscriberName (@profile.SubscriberCode)</MudSelectItem>
-            }
-        </MudSelect>
-    </MudItem>
-    <MudItem xs="12" sm="12" md="2" Class="d-flex align-center">
-        <MudButton Variant="Variant.Outlined" FullWidth="true" OnClick="ClearFiltersAsync">Clear Filters</MudButton>
-    </MudItem>
-</MudGrid>
+<MudTabs Outlined="true" Rounded="true" Border="true" ApplyEffectsToContainer="true" Class="mt-2" PanelClass="pa-4">
+    <MudTabPanel Text="History">
+        <MudGrid Class="mb-4">
+            <MudItem xs="12" sm="4" md="3">
+                <MudSelect T="string" Label="Year" Value="selectedYear" ValueChanged="OnYearChanged" Clearable="true">
+                    @foreach (var year in availableYears)
+                    {
+                        <MudSelectItem T="string" Value="@year">@year</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4" md="3">
+                <MudSelect T="string" Label="File Type" Value="selectedDataType" ValueChanged="OnDataTypeChanged" Clearable="true">
+                    <MudSelectItem T="string" Value="@("IND")">Individual</MudSelectItem>
+                    <MudSelectItem T="string" Value="@("BUS")">Business</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4" md="4">
+                <MudSelect T="int?" Label="Subscriber" Value="selectedSubscriberId" ValueChanged="OnSubscriberChanged" Clearable="true">
+                    @foreach (var profile in subscriberProfiles)
+                    {
+                        <MudSelectItem T="int?" Value="@profile.Id">@profile.SubscriberName (@profile.SubscriberCode)</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="12" md="2" Class="d-flex align-center">
+                <MudButton Variant="Variant.Outlined" FullWidth="true" OnClick="ClearFiltersAsync">Clear Filters</MudButton>
+            </MudItem>
+        </MudGrid>
 
-<MudDataGrid T="UnloadableLogHeader" Items="@logs" Loading="@isLoading" ReadOnly="false"
-             EditMode="DataGridEditMode.Cell" EditTrigger="DataGridEditTrigger.OnRowClick"
-             CommittedItemChanges="OnCommittedItemChanges"
-             Filterable="true" SortMode="SortMode.Multiple" Bordered="true" Striped="true" Dense="true">
-    <Columns>
-        <PropertyColumn Property="x => x.SubscriberProfile!.SubscriberName" Title="Subscriber" ReadOnly="true">
-            <CellTemplate>@context.Item.SubscriberProfile?.SubscriberName</CellTemplate>
-        </PropertyColumn>
-        <PropertyColumn Property="x => x.SubscriberProfile!.SubscriberCode" Title="Subcode" ReadOnly="true">
-            <CellTemplate>@context.Item.SubscriberProfile?.SubscriberCode</CellTemplate>
-        </PropertyColumn>
-        <PropertyColumn Property="x => x.DataType" Title="Type" ReadOnly="true">
-            <CellTemplate>@context.Item.DataType</CellTemplate>
-        </PropertyColumn>
-        <PropertyColumn Property="x => x.Filename" Title="Filename" ReadOnly="true">
-            <CellTemplate>@context.Item.Filename</CellTemplate>
-        </PropertyColumn>
-        <PropertyColumn Property="x => x.ReportingPeriod" Title="Reporting Period" ReadOnly="true">
-            <CellTemplate>@context.Item.ReportingPeriod</CellTemplate>
-        </PropertyColumn>
-        @* Explicit CellTemplate-only (no EditTemplate) here specifically because
-           ReadOnly="true" alone was not enough to stop this int column from
-           rendering a numeric up/down spinner and saving on every click --
-           NumberOfRecords is an immutable snapshot of the run and should never
-           be user-editable. *@
-        <PropertyColumn Property="x => x.NumberOfRecords" Title="# UNL Records" ReadOnly="true">
-            <CellTemplate>@context.Item.NumberOfRecords</CellTemplate>
-        </PropertyColumn>
-        <PropertyColumn Property="x => x.CreatedDate" Title="Generated On" ReadOnly="true">
-            <CellTemplate>@context.Item.CreatedDate.ToString("dd MMM yyyy HH:mm")</CellTemplate>
-        </PropertyColumn>
+        <MudDataGrid T="UnloadableLogHeader" Items="@logs" Loading="@isLoading" ReadOnly="false"
+                     EditMode="DataGridEditMode.Cell" EditTrigger="DataGridEditTrigger.OnRowClick"
+                     CommittedItemChanges="OnCommittedItemChanges"
+                     Filterable="true" SortMode="SortMode.Multiple" Bordered="true" Striped="true" Dense="true">
+            <Columns>
+                <PropertyColumn Property="x => x.SubscriberProfile!.SubscriberName" Title="Subscriber" ReadOnly="true">
+                    <CellTemplate>@context.Item.SubscriberProfile?.SubscriberName</CellTemplate>
+                </PropertyColumn>
+                <PropertyColumn Property="x => x.SubscriberProfile!.SubscriberCode" Title="Subcode" ReadOnly="true">
+                    <CellTemplate>@context.Item.SubscriberProfile?.SubscriberCode</CellTemplate>
+                </PropertyColumn>
+                <PropertyColumn Property="x => x.DataType" Title="Type" ReadOnly="true">
+                    <CellTemplate>@context.Item.DataType</CellTemplate>
+                </PropertyColumn>
+                <PropertyColumn Property="x => x.Filename" Title="Filename" ReadOnly="true">
+                    <CellTemplate>@context.Item.Filename</CellTemplate>
+                </PropertyColumn>
+                <PropertyColumn Property="x => x.ReportingPeriod" Title="Reporting Period" ReadOnly="true">
+                    <CellTemplate>@context.Item.ReportingPeriod</CellTemplate>
+                </PropertyColumn>
+                @* Explicit CellTemplate-only (no EditTemplate) here specifically because
+                   ReadOnly="true" alone was not enough to stop this int column from
+                   rendering a numeric up/down spinner and saving on every click --
+                   NumberOfRecords is an immutable snapshot of the run and should never
+                   be user-editable. *@
+                <PropertyColumn Property="x => x.NumberOfRecords" Title="# UNL Records" ReadOnly="true">
+                    <CellTemplate>@context.Item.NumberOfRecords</CellTemplate>
+                </PropertyColumn>
+                <PropertyColumn Property="x => x.CreatedDate" Title="Generated On" ReadOnly="true">
+                    <CellTemplate>@context.Item.CreatedDate.ToString("dd MMM yyyy HH:mm")</CellTemplate>
+                </PropertyColumn>
 
-        <PropertyColumn Property="x => x.DateEmailed" Title="Date Emailed">
-            <CellTemplate>
-                @(context.Item.DateEmailed?.ToString("dd MMM yyyy") ?? "—")
-            </CellTemplate>
-            <EditTemplate>
-                <MudDatePicker @bind-Date="context.Item.DateEmailed" Editable="true" />
-            </EditTemplate>
-        </PropertyColumn>
+                <PropertyColumn Property="x => x.DateEmailed" Title="Date Emailed">
+                    <CellTemplate>
+                        @(context.Item.DateEmailed?.ToString("dd MMM yyyy") ?? "—")
+                    </CellTemplate>
+                    <EditTemplate>
+                        <MudDatePicker @bind-Date="context.Item.DateEmailed" Editable="true" />
+                    </EditTemplate>
+                </PropertyColumn>
 
-        <PropertyColumn Property="x => x.DateFixed" Title="Date Fixed">
-            <CellTemplate>
-                @(context.Item.DateFixed?.ToString("dd MMM yyyy") ?? "—")
-            </CellTemplate>
-            <EditTemplate>
-                <MudDatePicker @bind-Date="context.Item.DateFixed" Editable="true" />
-            </EditTemplate>
-        </PropertyColumn>
+                <PropertyColumn Property="x => x.DateFixed" Title="Date Fixed">
+                    <CellTemplate>
+                        @(context.Item.DateFixed?.ToString("dd MMM yyyy") ?? "—")
+                    </CellTemplate>
+                    <EditTemplate>
+                        <MudDatePicker @bind-Date="context.Item.DateFixed" Editable="true" />
+                    </EditTemplate>
+                </PropertyColumn>
 
-        <PropertyColumn Property="x => x.Comments" Title="Comments">
-            <EditTemplate>
-                <MudTextField @bind-Value="context.Item.Comments" Lines="2" />
-            </EditTemplate>
-        </PropertyColumn>
-    </Columns>
-    <PagerContent>
-        <MudDataGridPager T="UnloadableLogHeader" PageSizeOptions="new[] { 25, 50, 100 }" />
-    </PagerContent>
-    <NoRecordsContent>
-        <MudText>No log entries match the current filters.</MudText>
-    </NoRecordsContent>
-</MudDataGrid>
+                <PropertyColumn Property="x => x.Comments" Title="Comments">
+                    <EditTemplate>
+                        <MudTextField @bind-Value="context.Item.Comments" Lines="2" />
+                    </EditTemplate>
+                </PropertyColumn>
+            </Columns>
+            <PagerContent>
+                <MudDataGridPager T="UnloadableLogHeader" PageSizeOptions="new[] { 25, 50, 100 }" />
+            </PagerContent>
+            <NoRecordsContent>
+                <MudText>No log entries match the current filters.</MudText>
+            </NoRecordsContent>
+        </MudDataGrid>
+    </MudTabPanel>
+
+    <MudTabPanel Text="Dashboard">
+        <MudGrid Class="mb-4">
+            <MudItem xs="12" sm="6" md="4">
+                <MudSelect T="string" Label="Year" Value="dashboardYear" ValueChanged="OnDashboardYearChanged" Clearable="true">
+                    @foreach (var year in availableYears)
+                    {
+                        <MudSelectItem T="string" Value="@year">@year</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        </MudGrid>
+
+        @if (dashboardLoading)
+        {
+            <MudProgressCircular Indeterminate="true" Class="mt-4" />
+        }
+        else if (summaryTotalRuns == 0)
+        {
+            <MudAlert Severity="Severity.Info">
+                No Unloadable Log data yet@(string.IsNullOrEmpty(dashboardYear) ? "" : $" for {dashboardYear}"). This
+                fills in automatically as files get processed and "Generate Unloadable Log" gets run going forward.
+            </MudAlert>
+        }
+        else
+        {
+            <MudGrid Class="mb-4">
+                <MudItem xs="12" sm="6" md="3">
+                    <MudPaper Class="pa-4" Elevation="2">
+                        <MudText Typo="Typo.subtitle2">Total Runs</MudText>
+                        <MudText Typo="Typo.h4">@summaryTotalRuns</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" sm="6" md="3">
+                    <MudPaper Class="pa-4" Elevation="2">
+                        <MudText Typo="Typo.subtitle2">Total UNL Records</MudText>
+                        <MudText Typo="Typo.h4">@summaryTotalUnlRecords</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" sm="6" md="3">
+                    <MudPaper Class="pa-4" Elevation="2">
+                        <MudText Typo="Typo.subtitle2">Awaiting Email</MudText>
+                        <MudText Typo="Typo.h4" Color="Color.Warning">@summaryAwaitingEmail</MudText>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" sm="6" md="3">
+                    <MudPaper Class="pa-4" Elevation="2">
+                        <MudText Typo="Typo.subtitle2">Emailed, Not Fixed</MudText>
+                        <MudText Typo="Typo.h4" Color="Color.Error">@summaryEmailedNotFixed</MudText>
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+
+            <MudGrid Class="mb-4">
+                <MudItem xs="12" md="6">
+                    <MudPaper Class="pa-4" Elevation="2">
+                        <MudText Typo="Typo.subtitle1" Class="mb-2">Top Rejection Categories</MudText>
+                        @if (categorySeries.Count == 0)
+                        {
+                            <MudText Typo="Typo.body2">No category data for this selection.</MudText>
+                        }
+                        else
+                        {
+                            <MudChart ChartType="ChartType.Bar" ChartSeries="@categorySeries" XAxisLabels="@categoryLabels" Width="100%" Height="300px" />
+                        }
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudPaper Class="pa-4" Elevation="2">
+                        <MudText Typo="Typo.subtitle1" Class="mb-2">Monthly UNL Volume</MudText>
+                        @if (trendSeries.Count == 0)
+                        {
+                            <MudText Typo="Typo.body2">No trend data for this selection.</MudText>
+                        }
+                        else
+                        {
+                            <MudChart ChartType="ChartType.Line" ChartSeries="@trendSeries" XAxisLabels="@trendLabels" Width="100%" Height="300px" />
+                        }
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+
+            <MudPaper Class="pa-4" Elevation="2">
+                <MudText Typo="Typo.subtitle1" Class="mb-2">Top Error Messages</MudText>
+                @if (topErrorMessages.Count == 0)
+                {
+                    <MudText Typo="Typo.body2">No error message data for this selection.</MudText>
+                }
+                else
+                {
+                    <MudTable Items="@topErrorMessages" Dense="true" Bordered="false" Striped="true">
+                        <HeaderContent>
+                            <MudTh>Error Message</MudTh>
+                            <MudTh>Category</MudTh>
+                            <MudTh>Total Records Affected</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="Error Message">@context.ErrorMessage</MudTd>
+                            <MudTd DataLabel="Category">@context.Category</MudTd>
+                            <MudTd DataLabel="Total Records Affected">@context.TotalCount</MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                }
+            </MudPaper>
+        }
+    </MudTabPanel>
+</MudTabs>
 
 @code {
     private MudBlazor.Severity AlertSeverity { get; set; } = MudBlazor.Severity.Success;
@@ -114,6 +225,19 @@
     private string? selectedDataType;
     private int? selectedSubscriberId;
 
+    // ── Dashboard state ──────────────────────────────────────────────────
+    private string? dashboardYear;
+    private bool dashboardLoading = true;
+    private int summaryTotalRuns;
+    private int summaryTotalUnlRecords;
+    private int summaryAwaitingEmail;
+    private int summaryEmailedNotFixed;
+    private List<ChartSeries> categorySeries = new();
+    private string[] categoryLabels = Array.Empty<string>();
+    private List<ChartSeries> trendSeries = new();
+    private string[] trendLabels = Array.Empty<string>();
+    private List<(string ErrorMessage, string Category, int TotalCount)> topErrorMessages = new();
+
     protected override async Task OnInitializedAsync()
     {
         subscriberProfiles = await DataManagementService.GetAllSubscriberProfilesAsync();
@@ -123,6 +247,9 @@
         // to see everything.
         selectedYear = DateTime.Now.Year.ToString();
         await ApplyFiltersAsync();
+        // Dashboard defaults to "all years" (null) so it shows the full
+        // picture on first view rather than just the current, likely-thin year.
+        await ApplyDashboardFiltersAsync();
     }
 
     private async Task OnYearChanged(string value)
@@ -174,6 +301,41 @@
             AlertSeverity = MudBlazor.Severity.Error;
         }
         AlertSeverityVisible = "d-block";
+        StateHasChanged();
+    }
+
+    private async Task OnDashboardYearChanged(string value)
+    {
+        dashboardYear = value;
+        await ApplyDashboardFiltersAsync();
+    }
+
+    private async Task ApplyDashboardFiltersAsync()
+    {
+        dashboardLoading = true;
+        StateHasChanged();
+
+        var summary = await DataManagementService.GetUnloadableLogDashboardSummaryAsync(dashboardYear);
+        summaryTotalRuns = summary.TotalRuns;
+        summaryTotalUnlRecords = summary.TotalUnlRecords;
+        summaryAwaitingEmail = summary.AwaitingEmailCount;
+        summaryEmailedNotFixed = summary.EmailedNotFixedCount;
+
+        var categories = await DataManagementService.GetTopCategoriesAsync(dashboardYear);
+        categoryLabels = categories.Select(c => c.SubCategory).ToArray();
+        categorySeries = categories.Count == 0
+            ? new List<ChartSeries>()
+            : new List<ChartSeries> { new ChartSeries { Name = "Volume Affected", Data = categories.Select(c => (double)c.TotalVolume).ToArray() } };
+
+        var trend = await DataManagementService.GetMonthlyTrendAsync(dashboardYear);
+        trendLabels = trend.Select(t => t.Label).ToArray();
+        trendSeries = trend.Count == 0
+            ? new List<ChartSeries>()
+            : new List<ChartSeries> { new ChartSeries { Name = "UNL Records", Data = trend.Select(t => (double)t.TotalRecords).ToArray() } };
+
+        topErrorMessages = await DataManagementService.GetTopErrorMessagesAsync(dashboardYear);
+
+        dashboardLoading = false;
         StateHasChanged();
     }
 }

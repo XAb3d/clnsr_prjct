@@ -882,4 +882,91 @@ public class DataManagementService
         existing.Comments = string.IsNullOrWhiteSpace(updated.Comments) ? null : updated.Comments;
         await _context.SaveChangesAsync();
     }
+
+    // ── Unloadable Log: dashboard aggregates ─────────────────────────────────
+    public async Task<(int TotalRuns, int TotalUnlRecords, int AwaitingEmailCount, int EmailedNotFixedCount)>
+        GetUnloadableLogDashboardSummaryAsync(string? logYear = null)
+    {
+        var query = _context.UnloadableLogHeaders.AsQueryable();
+        if (!string.IsNullOrWhiteSpace(logYear))
+            query = query.Where(h => h.LogYear == logYear);
+
+        int totalRuns = await query.CountAsync();
+        int totalUnlRecords = await query.SumAsync(h => (int?)h.NumberOfRecords) ?? 0;
+        int awaitingEmail = await query.CountAsync(h => h.DateEmailed == null);
+        int emailedNotFixed = await query.CountAsync(h => h.DateEmailed != null && h.DateFixed == null);
+
+        return (totalRuns, totalUnlRecords, awaitingEmail, emailedNotFixed);
+    }
+
+    // Cross-subscriber "what's actually driving rejections" -- Section 3.5
+    // in CleanserDB_Scripts.sql, rendered instead of hand-run.
+    public async Task<List<(string SubCategory, int TotalVolume)>> GetTopCategoriesAsync(string? logYear = null, int take = 8)
+    {
+        var query = _context.UnloadableLogCategoryDetails
+            .Include(c => c.UnloadableLogHeader)
+            .AsQueryable();
+        if (!string.IsNullOrWhiteSpace(logYear))
+            query = query.Where(c => c.UnloadableLogHeader!.LogYear == logYear);
+
+        var grouped = await query
+            .GroupBy(c => c.SubCategory)
+            .Select(g => new { SubCategory = g.Key, TotalVolume = g.Sum(x => x.VolumeAffected) })
+            .OrderByDescending(g => g.TotalVolume)
+            .Take(take)
+            .ToListAsync();
+
+        return grouped.Select(g => (g.SubCategory, g.TotalVolume)).ToList();
+    }
+
+    // Monthly UNL volume trend. Months is stored as a name ("January"), not
+    // chronologically sortable in SQL -- grouped in SQL, then ordered in
+    // memory using the actual month number.
+    public async Task<List<(string Label, int TotalRecords)>> GetMonthlyTrendAsync(string? logYear = null)
+    {
+        var query = _context.UnloadableLogHeaders.AsQueryable();
+        if (!string.IsNullOrWhiteSpace(logYear))
+            query = query.Where(h => h.LogYear == logYear);
+
+        var raw = await query
+            .GroupBy(h => new { h.LogYear, h.Months })
+            .Select(g => new { g.Key.LogYear, g.Key.Months, TotalRecords = g.Sum(x => x.NumberOfRecords) })
+            .ToListAsync();
+
+        return raw
+            .Select(r => new { r.LogYear, r.Months, r.TotalRecords, SortKey = MonthSortKey(r.LogYear, r.Months) })
+            .OrderBy(r => r.SortKey)
+            .Select(r => ($"{r.Months} {r.LogYear}", r.TotalRecords))
+            .ToList();
+    }
+
+    private static DateTime MonthSortKey(string year, string monthName)
+    {
+        if (int.TryParse(year, out int y) &&
+            DateTime.TryParseExact(monthName, "MMMM", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            return new DateTime(y, parsed.Month, 1);
+        }
+        return DateTime.MinValue;
+    }
+
+    // Most common individual error messages across every subscriber --
+    // Section 3.7 in CleanserDB_Scripts.sql.
+    public async Task<List<(string ErrorMessage, string Category, int TotalCount)>> GetTopErrorMessagesAsync(string? logYear = null, int take = 10)
+    {
+        var query = _context.UnloadableLogMessageDetails
+            .Include(m => m.UnloadableLogHeader)
+            .AsQueryable();
+        if (!string.IsNullOrWhiteSpace(logYear))
+            query = query.Where(m => m.UnloadableLogHeader!.LogYear == logYear);
+
+        var grouped = await query
+            .GroupBy(m => new { m.ErrorMessage, m.Category })
+            .Select(g => new { g.Key.ErrorMessage, g.Key.Category, TotalCount = g.Sum(x => x.Count) })
+            .OrderByDescending(g => g.TotalCount)
+            .Take(take)
+            .ToListAsync();
+
+        return grouped.Select(g => (g.ErrorMessage, g.Category, g.TotalCount)).ToList();
+    }
 }
