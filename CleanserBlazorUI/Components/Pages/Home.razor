@@ -20,10 +20,26 @@
     <div style="width:100%; background: #001D23">
         <MudAlert Class="@AlertSeverityVisible" Severity="@AlertSeverity">@AlertSeverityMessage</MudAlert>
         <MudProgressLinear Indeterminate="true" Color="Color.Primary" Buffer="true" Class="@progressIsVisible" Style="margin-top: 10px; margin-bottom: 0px;" />
-        <MudExpansionPanels Elevation="24">
+        <style>
+            .format-pills { display:flex; gap:2px; background: var(--mud-palette-background-grey, #0F2225); border:1px solid var(--mud-palette-lines-default, #22383B); border-radius:8px; padding:3px; margin-bottom:14px; width: fit-content; }
+            .format-pill { font-size:13px; padding:9px 16px; border-radius:6px; border:none; background:transparent; color: var(--mud-palette-text-secondary, #93A29C); cursor:pointer; font-family: inherit; }
+            .format-pill.active { background: var(--mud-palette-primary, #1D9E75); color: #06231A; font-weight:600; }
+        </style>
+        @* Replaces the previous MudExpansionPanels accordion (4 panels, only one
+           open at a time) with a pill selector over one shared workspace below.
+           Reuses the exact same state (expandPanelSelectedOption) and the exact
+           same reset-on-switch method (OnPanelExpandedChanged) the accordion
+           already used -- no change to what happens when you switch formats,
+           only how you pick one. *@
+        <div class="format-pills">
             @foreach (var item in TopExpandPanelsContent!)
             {
-                <MudExpansionPanel Text="@item.Title" Expanded="@OpenExpandedPanel" ExpandedChanged="() => OnPanelExpandedChanged(item.IdShortName)" style="background: #001D23">
+                <button type="button" class="format-pill @(expandPanelSelectedOption == item.IdShortName ? "active" : "")" @onclick="() => OnPanelExpandedChanged(item.IdShortName)">@item.Title</button>
+            }
+        </div>
+        @foreach (var item in TopExpandPanelsContent!)
+        {
+            <div style="display:@(expandPanelSelectedOption == item.IdShortName ? "block" : "none")">
                     <MudStack Style="width: 100%">
                         <style>
                             /* Dark theme styles */
@@ -193,9 +209,8 @@
 
 
 
-                </MudExpansionPanel>
+                </div>
             }
-        </MudExpansionPanels>
 
     </div>
     @*  <>Result from file upload</> *@
