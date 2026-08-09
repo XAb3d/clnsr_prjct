@@ -6452,6 +6452,23 @@
                 bc.DisbursementDate.Passed = false;
                 bc.DisbursementDate.Errors = new List<string>() { "DISBURSEMENT DATE CANNOT BE GREATER THAN SUBMISSION DATE" };
             }
+            // ── Implausible year sanity check ────────────────────────────────
+            // CheckDate's TryParseExact("yyyyMMdd") accepts any year .NET's
+            // DateTime supports (0001-9999) -- a garbled value like "12000423"
+            // parses as a "valid" date (23 Apr, year 1200) and passes the
+            // 18-plus/not-future checks trivially. A facility genuinely
+            // disbursed before 1990 wouldn't still be an active, reportable
+            // credit facility today.
+            if (_dDate.IsValidFormat && _dDate.TheDate.Year < 1990)
+            {
+                bc.DisbursementDate.Passed = false;
+                bc.DisbursementDate.Errors = new List<string>() { $"DISBURSEMENT DATE YEAR ({_dDate.TheDate.Year}) IS IMPLAUSIBLY EARLY — CHECK FOR A DATA ENTRY ERROR" };
+            }
+            if (_mDate.IsValidFormat && _mDate.TheDate.Year < 1990)
+            {
+                bc.MaturityDate.Passed = false;
+                bc.MaturityDate.Errors = new List<string>() { $"MATURITY DATE YEAR ({_mDate.TheDate.Year}) IS IMPLAUSIBLY EARLY — CHECK FOR A DATA ENTRY ERROR" };
+            }
 
             if (string.IsNullOrWhiteSpace(bc.FacilityStatusCode.Data))
             {
@@ -6654,7 +6671,8 @@
             foreach (var (idField, idLabel) in new (CellDataAndStatus? field, string label)[]
             {
                 (ic.NatIDNum, "NATIDNUM"), (ic.VotersIDNum, "VOTERSIDNUM"), (ic.DriverLicNum, "DRIVERLICNUM"),
-                (ic.PassportNum, "PASSPORTNUM"), (ic.SSNum, "SSNUM"), (ic.EzwichNum, "EZWICHNUM"), (ic.OtherIDNum, "OTHERIDNUM")
+                (ic.PassportNum, "PASSPORTNUM"), (ic.SSNum, "SSNUM"), (ic.EzwichNum, "EZWICHNUM"), (ic.OtherIDNum, "OTHERIDNUM"),
+                (ic.TINum, "TINUM")
             })
             {
                 if (IsSequentialPlaceholderDigits(idField?.Data))
@@ -7046,6 +7064,17 @@
                 ic.DisbursementDate.Passed = false;
                 ic.DisbursementDate.Errors = new List<string>() { "DISBURSEMENT DATE CANNOT BE GREATER THAN SUBMISSION DATE" };
             }
+            // ── Implausible year sanity check (see Business-side twin above) ──
+            if (_dDate.IsValidFormat && _dDate.TheDate.Year < 1990)
+            {
+                ic.DisbursementDate.Passed = false;
+                ic.DisbursementDate.Errors = new List<string>() { $"DISBURSEMENT DATE YEAR ({_dDate.TheDate.Year}) IS IMPLAUSIBLY EARLY — CHECK FOR A DATA ENTRY ERROR" };
+            }
+            if (_mDate.IsValidFormat && _mDate.TheDate.Year < 1990)
+            {
+                ic.MaturityDate.Passed = false;
+                ic.MaturityDate.Errors = new List<string>() { $"MATURITY DATE YEAR ({_mDate.TheDate.Year}) IS IMPLAUSIBLY EARLY — CHECK FOR A DATA ENTRY ERROR" };
+            }
 
             if (string.IsNullOrWhiteSpace(ic.FacilityStatusCode.Data))
             {
@@ -7244,11 +7273,26 @@
             bool DisbursementAmt = ic.DisbursementAmt.Errors == null || ic.DisbursementAmt.Errors.Count == 0;
             bool MaturityDate = ic.MaturityDate.Errors == null || ic.MaturityDate.Errors.Count == 0;
             bool CurBal = ic.CurBal.Errors == null || ic.CurBal.Errors.Count == 0;
+            // ── Previously missing from IsPassed entirely ───────────────────────
+            // VotersIDNum/DriverLicNum/PassportNum/SSNum/EzwichNum/OtherIDNum/TINum
+            // could all have AddCellError called on them (GHA-format checks,
+            // the sequential-placeholder check above, cross-record conflict
+            // checks) and it had zero effect on whether the record passed --
+            // only NatIDNum's error status was ever consulted below. A
+            // sequential placeholder like "123456789" in VotersIDNum, for
+            // example, got visibly flagged but never actually failed the record.
+            bool VotersID = ic.VotersIDNum.Errors == null || ic.VotersIDNum.Errors.Count == 0;
+            bool DriverLic = ic.DriverLicNum.Errors == null || ic.DriverLicNum.Errors.Count == 0;
+            bool PassportN = ic.PassportNum.Errors == null || ic.PassportNum.Errors.Count == 0;
+            bool SSN = ic.SSNum.Errors == null || ic.SSNum.Errors.Count == 0;
+            bool EzwichN = ic.EzwichNum.Errors == null || ic.EzwichNum.Errors.Count == 0;
+            bool OtherIDN = ic.OtherIDNum.Errors == null || ic.OtherIDNum.Errors.Count == 0;
+            bool TINumOk = ic.TINum.Errors == null || ic.TINum.Errors.Count == 0;
 
 
 
             ic.IsPassed = CreditFacilityAccNum && CustomerID && ids[0].Passed && Nat_id && ic.FirstName.Passed && ic.Surname.Passed && DateOfBirth && FacilityAmount && DisbursementDate &&
-            DisbursementAmt && MaturityDate && CurBal;
+            DisbursementAmt && MaturityDate && CurBal && VotersID && DriverLic && PassportN && SSN && EzwichN && OtherIDN && TINumOk;
             return ic.IsPassed;
         }
         if (typeof(T) == typeof(BusinessContextDud))
