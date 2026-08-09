@@ -1,8 +1,9 @@
 ﻿@inherits LayoutComponentBase
 @implements IDisposable
 @inject NavigationManager NavigationManager
+@using CleanserBlazorUI.Theme
 
-<MudThemeProvider @bind-IsDarkMode="@IsDark" />
+<MudThemeProvider @bind-IsDarkMode="@IsDark" Theme="@CleanserTheme.Default" />
 @* Explicit @rendermode here matters: MainLayout itself renders statically,
    so without pinning these to InteractiveServer, any page that opts into
    @rendermode InteractiveServer gets its own separate interactive circuit
@@ -13,9 +14,9 @@
 <MudDialogProvider @rendermode="InteractiveServer" />
 <MudSnackbarProvider @rendermode="InteractiveServer" />
 
-<MudAppBar Fixed="true" Dense="false" Elevation="25" Style="@($"color:{Colors.LightGreen.Accent3}; background:{Colors.BlueGray.Darken4};")">
+<MudAppBar Fixed="true" Dense="false" Elevation="0">
     <MudLink Href="/">
-        <MudImage Style="@($"color:{Colors.LightGreen.Accent3}; padding-block: 10px; padding: 5px; background:{Colors.BlueGray.Darken4};")" Src="logocolor.png" Height="55" Width="110"></MudImage>
+        <MudImage Style="padding: 5px;" Src="logocolor.png" Height="55" Width="110"></MudImage>
     </MudLink>
 
     <MudSpacer />
@@ -41,17 +42,17 @@
     </AuthorizeView>
 </MudAppBar>
 
-<MudMainContent Style="background-color: #001D23; overflow: hidden;">
-    <MudContainer Style="min-height: 100vh; background-color: #001D23; overflow-y: hidden;" MaxWidth="MaxWidth.ExtraExtraLarge" Class="my-sample-main-content-container my-4 pt-4">
+<MudMainContent Style="overflow: hidden;">
+    <MudContainer Style="min-height: 100vh; overflow-y: hidden;" MaxWidth="MaxWidth.ExtraExtraLarge" Class="my-sample-main-content-container my-4 pt-4">
         @Body
-        <MudAppBar Bottom="true" Fixed="true" Dense="@true" Elevation="24" Style="@($"color:{Colors.LightGreen.Accent3}; background:{Colors.BlueGray.Darken4}; width: 100%; padding-top: 10px")">
+        <MudAppBar Bottom="true" Fixed="true" Dense="@true" Elevation="0" Style="width: 100%; padding-top: 10px">
             <MudSpacer></MudSpacer>
             <MudPaper Elevation="0" style="background-color: transparent">
                 <div>
                     Cleanser © @DateTime.Now.Year.ToString() <strong>AB3 Data</strong>. All rights reserved.
-                    <a href="/privacy-policy" style="color: #007bff; text-decoration: none;">Privacy Policy</a> |
-                    <a href="/terms-of-service" style="color: #007bff; text-decoration: none;">Terms of Service</a> |
-                    <a href="/cookie-policy" style="color: #007bff; text-decoration: none;">Cookie Policy</a>
+                    <a href="/privacy-policy" style="color: var(--mud-palette-primary); text-decoration: none;">Privacy Policy</a> |
+                    <a href="/terms-of-service" style="color: var(--mud-palette-primary); text-decoration: none;">Terms of Service</a> |
+                    <a href="/cookie-policy" style="color: var(--mud-palette-primary); text-decoration: none;">Cookie Policy</a>
                 </div>
             </MudPaper>
         </MudAppBar>
