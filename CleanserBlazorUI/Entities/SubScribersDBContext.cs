@@ -364,6 +364,13 @@ public class BusinessRef
     public string? DisbursementDate { get; set; } = string.Empty;
     public DateTime CreatedDate { get; set; }
     public DateTime LastUpdatedDate { get; set; }
+    // ── Option A: lightweight "when was this last confirmed" tracking ────────
+    // NOT a full change-history (that's the external system's job) -- just the
+    // most recent reporting period this row was seen/matched again, updated on
+    // every match regardless of whether any field actually changed. Answers
+    // "as of the last time we processed this subscriber's file, this was on
+    // record" for the common case of chasing a recent mismatch.
+    public string? LastConfirmedReportingPeriod { get; set; } = string.Empty;
     // ── Identity fields for reference-trust validation (mirrors IndividualRef) ──
     public string? Businessname { get; set; } = string.Empty;
     public string? Busregnum { get; set; } = string.Empty;
@@ -382,6 +389,8 @@ public class IndividualRef
     public string? DisbursementDate { get; set; } = string.Empty;
     public DateTime CreatedDate { get; set; }
     public DateTime LastUpdatedDate { get; set; }
+    // ── Option A: see BusinessRef.LastConfirmedReportingPeriod above ─────────
+    public string? LastConfirmedReportingPeriod { get; set; } = string.Empty;
     // ── Sprint 5: Personal ID fields ──────────────────────────────────────────
     public string? NatIDNum     { get; set; } = string.Empty;
     public string? VotersIDNum  { get; set; } = string.Empty;

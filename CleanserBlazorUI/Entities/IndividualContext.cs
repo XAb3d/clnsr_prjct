@@ -45,6 +45,17 @@ public class IndividualContext
     /// </summary>
     public string? PreviousNameOnFile { get; set; } = null;
     /// <summary>
+    /// Same idea as PreviousNameOnFile, for date of birth -- "what's on file"
+    /// DOB for this CustomerID, so a DOB-conflict message can show the
+    /// previous value instead of just flagging that a conflict exists.
+    /// </summary>
+    public string? PreviousDOBOnFile { get; set; } = null;
+    /// <summary>
+    /// Reporting period (e.g. "July 2026") the reference DOB above was last
+    /// confirmed in -- see IndividualRef.LastConfirmedReportingPeriod.
+    /// </summary>
+    public string? PreviousDOBReportingPeriod { get; set; } = null;
+    /// <summary>
     /// Set when the name was accepted based on reference trust. Written to WARNING column.
     /// </summary>
     public string? ReferenceNameTrustNote { get; set; } = null;

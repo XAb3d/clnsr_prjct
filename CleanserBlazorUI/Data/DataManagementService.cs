@@ -52,6 +52,7 @@ public class DataManagementService
 
         var subscriber = await GetFileShortCodeFromFileName(fileShortName);
         var now        = DateTime.Now;
+        var reportingPeriod = GetReportingPeriodLabel(fileShortName);
         var changelog  = new List<(string, string, string, string)>();
 
         var existing = await _context.IndividualsData
@@ -102,8 +103,17 @@ public class DataManagementService
                     dbRow.LastUpdatedDate = now;
                     toUpdate.Add(dbRow);
                 }
-                if (!string.IsNullOrWhiteSpace(item.DateOfBirth))
+                // Previously set on the tracked entity but never added to
+                // toUpdate unless another field also changed -- BulkUpdateAsync
+                // bypasses the change tracker entirely, so a DOB-only update
+                // with nothing else newly enriched was silently never
+                // persisted. Now explicitly tracked whenever DOB actually changes.
+                if (!string.IsNullOrWhiteSpace(item.DateOfBirth) && dbRow.DateOfBirth != item.DateOfBirth)
+                {
                     dbRow.DateOfBirth = item.DateOfBirth;
+                    dbRow.LastUpdatedDate = now;
+                    if (!toUpdate.Contains(dbRow)) toUpdate.Add(dbRow);
+                }
 
                 // Status is a mutable real-world state (open/closed), not enriched-once
                 // like names/IDs -- always refresh to whatever was just submitted.
@@ -111,6 +121,14 @@ public class DataManagementService
                 {
                     dbRow.FacilityStatusCode = item.FacilityStatusCode;
                     dbRow.LastUpdatedDate = now;
+                    if (!toUpdate.Contains(dbRow)) toUpdate.Add(dbRow);
+                }
+
+                // Option A: "last confirmed" tracking -- update on every match,
+                // regardless of whether any field's value actually changed.
+                if (dbRow.LastConfirmedReportingPeriod != reportingPeriod)
+                {
+                    dbRow.LastConfirmedReportingPeriod = reportingPeriod;
                     if (!toUpdate.Contains(dbRow)) toUpdate.Add(dbRow);
                 }
             }
@@ -134,6 +152,7 @@ public class DataManagementService
                     FirstName            = item.FirstName                  ?? string.Empty,
                     MiddleNames          = item.MiddleNames                ?? string.Empty,
                     FacilityStatusCode   = item.FacilityStatusCode         ?? string.Empty,
+                    LastConfirmedReportingPeriod = reportingPeriod,
                     CurrenVersion        = 1,
                     CreatedDate          = now,
                     LastUpdatedDate      = now
@@ -184,6 +203,7 @@ public class DataManagementService
 
         var subscriber = await GetFileShortCodeFromFileName(fileShortName);
         var now        = DateTime.Now;
+        var reportingPeriod = GetReportingPeriodLabel(fileShortName);
 
         var existing = await _context.BusinessesData
             .Where(r => r.SubscriberCode == subscriber)
@@ -206,8 +226,12 @@ public class DataManagementService
 
             if (existingIndex.TryGetValue(key, out var dbRow))
             {
-                if (!string.IsNullOrWhiteSpace(item.DateOfBirth))
+                if (!string.IsNullOrWhiteSpace(item.DateOfBirth) && dbRow.DateOfBirth != item.DateOfBirth)
+                {
                     dbRow.DateOfBirth = item.DateOfBirth;
+                    dbRow.LastUpdatedDate = now;
+                    if (!toUpdate.Contains(dbRow)) toUpdate.Add(dbRow);
+                }
 
                 string? businessName = dbRow.Businessname, busRegNum = dbRow.Busregnum, tinNum = dbRow.Tinum;
                 bool changed = false;
@@ -231,6 +255,13 @@ public class DataManagementService
                     dbRow.LastUpdatedDate = now;
                     if (!toUpdate.Contains(dbRow)) toUpdate.Add(dbRow);
                 }
+
+                // Option A: "last confirmed" tracking -- see IND overload above.
+                if (dbRow.LastConfirmedReportingPeriod != reportingPeriod)
+                {
+                    dbRow.LastConfirmedReportingPeriod = reportingPeriod;
+                    if (!toUpdate.Contains(dbRow)) toUpdate.Add(dbRow);
+                }
             }
             else
             {
@@ -245,6 +276,7 @@ public class DataManagementService
                     Busregnum            = item.Busregnum        ?? string.Empty,
                     Tinum                = item.Tinum            ?? string.Empty,
                     FacilityStatusCode   = item.FacilityStatusCode ?? string.Empty,
+                    LastConfirmedReportingPeriod = reportingPeriod,
                     CurrenVersion        = 1,
                     CreatedDate          = now,
                     LastUpdatedDate      = now
@@ -293,6 +325,25 @@ public class DataManagementService
 
     private string Norm(string? v) =>
         string.IsNullOrWhiteSpace(v) ? string.Empty : v.Trim().ToUpperInvariant();
+
+    // ── Option A: "last confirmed" reporting-period tracking ──────────────────
+    // Derives a human-readable "MMMM yyyy" label from the filename's facility
+    // date, same convention already used for the Unloadable Log header
+    // (_lastUnlReportingPeriod in Home.razor). Not a full history -- just
+    // "as of the most recent time we processed this subscriber's file, this
+    // reference row was confirmed." Falls back to empty string if the
+    // filename's date can't be parsed, rather than throwing.
+    private string GetReportingPeriodLabel(string fileShortName)
+    {
+        var stringHelper = new StringHelper();
+        var facilityDate = stringHelper.GetFacilityDateFromFileName(fileShortName, true);
+        if (facilityDate.IsValid &&
+            DateTime.TryParseExact(facilityDate.LastDate, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
+        {
+            return parsed.ToString("MMMM yyyy", CultureInfo.InvariantCulture);
+        }
+        return string.Empty;
+    }
 
 
 

@@ -3020,10 +3020,12 @@
     // within one file. The caller must remove these synthetic records again
     // afterward (via the returned marker set) -- they must never reach
     // output, DB save, or counts.
-    List<IndividualContext> BuildReferenceVirtualRecordsInd(List<IndividualContext> incoming, List<IndividualRef> fromDatabase, out Dictionary<string, string> previousNameByCustomer)
+    List<IndividualContext> BuildReferenceVirtualRecordsInd(List<IndividualContext> incoming, List<IndividualRef> fromDatabase, out Dictionary<string, string> previousNameByCustomer, out Dictionary<string, string> previousDOBByCustomer, out Dictionary<string, string> previousDOBReportingPeriodByCustomer)
     {
         var virtualRecords = new List<IndividualContext>();
         previousNameByCustomer = new Dictionary<string, string>();
+        previousDOBByCustomer = new Dictionary<string, string>();
+        previousDOBReportingPeriodByCustomer = new Dictionary<string, string>();
         if (incoming == null || incoming.Count == 0 || fromDatabase == null || fromDatabase.Count == 0)
             return virtualRecords;
 
@@ -3073,6 +3075,17 @@
             if (!string.IsNullOrWhiteSpace(readableName))
             {
                 previousNameByCustomer[group.Key] = readableName.Trim();
+            }
+
+            // Same idea for DOB -- what's on file, plus which reporting period
+            // it was last confirmed in, for display alongside a conflict message.
+            if (!string.IsNullOrWhiteSpace(canonical.DateOfBirth))
+            {
+                previousDOBByCustomer[group.Key] = canonical.DateOfBirth.Trim();
+                if (!string.IsNullOrWhiteSpace(canonical.LastConfirmedReportingPeriod))
+                {
+                    previousDOBReportingPeriodByCustomer[group.Key] = canonical.LastConfirmedReportingPeriod.Trim();
+                }
             }
 
         }
@@ -3481,13 +3494,21 @@
                         // history get caught by the same cross-record logic that already
                         // catches conflicts within this file -- then discard the virtual
                         // records again before anything else sees them.
-                        var referenceVirtualsInd = BuildReferenceVirtualRecordsInd(mainMatcherTransformer_temp, RefData, out var previousNameByCustomer);
+                        var referenceVirtualsInd = BuildReferenceVirtualRecordsInd(mainMatcherTransformer_temp, RefData, out var previousNameByCustomer, out var previousDOBByCustomer, out var previousDOBReportingPeriodByCustomer);
                         foreach (var rec in mainMatcherTransformer_temp)
                         {
                             var custKey = NormalizeCustomerId(rec.CustomerID?.Data);
                             if (!string.IsNullOrWhiteSpace(custKey) && previousNameByCustomer.TryGetValue(custKey, out var prevName))
                             {
                                 rec.PreviousNameOnFile = prevName;
+                            }
+                            if (!string.IsNullOrWhiteSpace(custKey) && previousDOBByCustomer.TryGetValue(custKey, out var prevDob))
+                            {
+                                rec.PreviousDOBOnFile = prevDob;
+                                if (previousDOBReportingPeriodByCustomer.TryGetValue(custKey, out var prevDobPeriod))
+                                {
+                                    rec.PreviousDOBReportingPeriod = prevDobPeriod;
+                                }
                             }
                         }
                         var forCrossChecksInd = mainMatcherTransformer_temp.Concat(referenceVirtualsInd).ToList();
@@ -7197,8 +7218,28 @@
 
             // ── #14: Same CustomerID different DOB ────────────────────────────
             if (!string.IsNullOrWhiteSpace(ic.SameCustomerIDDifferentDOB))
-                AddCellError(ic.DateOfBirth,
-                    "CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT DATES OF BIRTH");
+            {
+                var currentDob = (ic.DateOfBirth?.Data ?? string.Empty).Trim();
+                bool isReferenceMismatch = !string.IsNullOrWhiteSpace(ic.PreviousDOBOnFile)
+                    && !string.Equals(ic.PreviousDOBOnFile, currentDob, StringComparison.Ordinal);
+
+                if (isReferenceMismatch)
+                {
+                    var periodNote = string.IsNullOrWhiteSpace(ic.PreviousDOBReportingPeriod)
+                        ? string.Empty
+                        : $" (LAST CONFIRMED: {ic.PreviousDOBReportingPeriod.ToUpperInvariant()})";
+                    AddCellError(ic.DateOfBirth,
+                        $"DATE OF BIRTH DOES NOT MATCH PREVIOUS SUBMISSION — WAS {ic.PreviousDOBOnFile}{periodNote}");
+                }
+                else
+                {
+                    // Two records within THIS file disagree, with no reference
+                    // history to point to -- can't say what it "was", just that
+                    // it's inconsistent right now.
+                    AddCellError(ic.DateOfBirth,
+                        "CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT DATES OF BIRTH");
+                }
+            }
 
             // ── NatID format check ────────────────────────────────────────────
             if (!string.IsNullOrWhiteSpace(ic.NatIDFormatInvalid))
