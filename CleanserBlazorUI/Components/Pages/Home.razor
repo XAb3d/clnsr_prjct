@@ -1954,8 +1954,26 @@
 
             if (distinctBusregnums > 1 || distinctTinums > 1)
             {
+                // Name the actual conflicting values, not just "E" -- this is
+                // exactly what made it hard to trace which record/value was
+                // the problem once there were many flagged at once.
+                var conflictParts = new List<string>();
+                if (distinctBusregnums > 1)
+                {
+                    var regList = grp.Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
+                        .Select(r => NormReg(r.Busregnum.Data)).Distinct();
+                    conflictParts.Add($"REGISTRATION NUMBERS {string.Join(", ", regList)}");
+                }
+                if (distinctTinums > 1)
+                {
+                    var tinList = grp.Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
+                        .Select(r => NormReg(r.Tinum.Data)).Distinct();
+                    conflictParts.Add($"TINS {string.Join(", ", tinList)}");
+                }
+                var msg = $"CUSTOMER ID {grp.Key} IS LINKED TO MULTIPLE {string.Join(" AND ", conflictParts)} — VERIFY WHICH IS CORRECT";
                 foreach (var rec in grp)
-                    rec.CustomerIDBusregnumTinumStatus = "E";
+                    rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
+                        ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
             }
         }
 
@@ -1998,8 +2016,23 @@
 
             if (customerIdConflict || distinctTinums > 1)
             {
+                var conflictParts = new List<string>();
+                if (customerIdConflict)
+                {
+                    var custIdList = grp.Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
+                        .Select(r => NormalizeCustomerId(r.CustomerID.Data)).Distinct();
+                    conflictParts.Add($"CUSTOMER ID(S) {string.Join(", ", custIdList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS");
+                }
+                if (distinctTinums > 1)
+                {
+                    var tinList = grp.Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
+                        .Select(r => NormReg(r.Tinum.Data)).Distinct();
+                    conflictParts.Add($"MULTIPLE TINS {string.Join(", ", tinList)}");
+                }
+                var msg = $"REGISTRATION NUMBER {grp.Key} IS SHARED WITH {string.Join(" AND ", conflictParts)}";
                 foreach (var rec in grp)
-                    rec.CustomerIDBusregnumTinumStatus = "E";
+                    rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
+                        ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
             }
         }
 
@@ -2037,8 +2070,23 @@
 
             if (customerIdConflict || distinctBusregnums > 1)
             {
+                var conflictParts = new List<string>();
+                if (customerIdConflict)
+                {
+                    var custIdList = grp.Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
+                        .Select(r => NormalizeCustomerId(r.CustomerID.Data)).Distinct();
+                    conflictParts.Add($"CUSTOMER ID(S) {string.Join(", ", custIdList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS");
+                }
+                if (distinctBusregnums > 1)
+                {
+                    var regList = grp.Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
+                        .Select(r => NormReg(r.Busregnum.Data)).Distinct();
+                    conflictParts.Add($"MULTIPLE REGISTRATION NUMBERS {string.Join(", ", regList)}");
+                }
+                var msg = $"TIN {grp.Key} IS SHARED WITH {string.Join(" AND ", conflictParts)}";
                 foreach (var rec in grp)
-                    rec.CustomerIDBusregnumTinumStatus = "E";
+                    rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
+                        ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
             }
         }
 
@@ -6244,26 +6292,34 @@
                 }
 
                 // ── All-numeric registration number ─────────────────────────────
-                // Unlike a personal ID, a Business registration number being purely
-                // numeric (no letters at all -- Ghana business reg numbers normally
-                // carry a letter prefix, e.g. "CS", "BN") is itself suspicious, not
-                // just a sequential-placeholder pattern. Same 2019 cutoff precedent
-                // as the blank-IDs check above -- only enforced on recent
-                // submissions, so historical records aren't retroactively flagged.
-                //
-                // Strip whitespace/hyphens before judging "all digits" -- without
-                // this, a value that's genuinely all-numeric in substance (e.g.
-                // "123 456 789" or "123-456-789", both common ways a registration
-                // number gets typed) was silently missed, since a raw space or
-                // hyphen isn't itself a digit. Same cleaning approach already used
-                // for the GHA card check.
+                // A registration number OR TIN being purely numeric (no letters --
+                // Ghana business reg numbers and TINs normally carry a letter
+                // prefix, e.g. "CS", "BN", "P") is suspicious on its own, but if
+                // the OTHER identifier is well-formed (has a letter), that's still
+                // a usable, trustworthy ID for this business -- e.g. Busregnum
+                // "12893454" alongside Tinum "P000237846" shouldn't fail just
+                // because the registration number alone looks numeric. Only flag
+                // when NEITHER field has a letter, mirroring the "both missing"
+                // logic of the blank/Ghana-card check above. Same 2019 cutoff
+                // precedent -- only enforced on recent submissions.
+                var tinumCleanedForNumericCheck = new string(
+                    (bc.Tinum.Data ?? string.Empty).Where(c => !char.IsWhiteSpace(c) && c != '-').ToArray());
                 var busregnumCleanedForNumericCheck = new string(
                     (bc.Busregnum.Data ?? string.Empty).Where(c => !char.IsWhiteSpace(c) && c != '-').ToArray());
-                if (!string.IsNullOrWhiteSpace(busregnumCleanedForNumericCheck) &&
-                    busregnumCleanedForNumericCheck.All(char.IsDigit) &&
-                    _date.IsValidFormat && _date.TheDate.Year > 2019)
+
+                bool busregLooksAllNumeric = !string.IsNullOrWhiteSpace(busregnumCleanedForNumericCheck) &&
+                                              busregnumCleanedForNumericCheck.All(char.IsDigit);
+                bool tinumLooksAllNumeric  = !string.IsNullOrWhiteSpace(tinumCleanedForNumericCheck) &&
+                                              tinumCleanedForNumericCheck.All(char.IsDigit);
+                bool busregHasLetter = !string.IsNullOrWhiteSpace(busregnumCleanedForNumericCheck) && !busregLooksAllNumeric;
+                bool tinumHasLetter  = !string.IsNullOrWhiteSpace(tinumCleanedForNumericCheck) && !tinumLooksAllNumeric;
+
+                if (!busregHasLetter && !tinumHasLetter && _date.IsValidFormat && _date.TheDate.Year > 2019)
                 {
-                    AddCellError(bc.Busregnum, "BUSREGNUM: ALL-NUMERIC REGISTRATION NUMBER — PROVIDE A VALID REGISTRATION NUMBER");
+                    if (busregLooksAllNumeric)
+                        AddCellError(bc.Busregnum, "BUSREGNUM: ALL-NUMERIC REGISTRATION NUMBER — PROVIDE A VALID REGISTRATION NUMBER (TINUM ALSO NOT A USABLE ALTERNATE ID)");
+                    if (tinumLooksAllNumeric)
+                        AddCellError(bc.Tinum, "TINUM: ALL-NUMERIC TIN — PROVIDE A VALID TIN (BUSREGNUM ALSO NOT A USABLE ALTERNATE ID)");
                 }
 
             }
@@ -6609,7 +6665,11 @@
 
             if (!string.IsNullOrWhiteSpace(bc.CustomerIDBusregnumTinumStatus))
             {
-                AddCellError(bc.CustomerID, "SAME BUSINESS REGISTRATION NUMBER OR TIN NUMBERS FOR DIFFERENT CUSTOMERS");
+                // CustomerIDBusregnumTinumStatus now carries the actual
+                // conflict detail (which customer IDs / values), built where
+                // the conflict was detected -- not just a flat flag -- so
+                // this is naming the specific problem, not a generic message.
+                AddCellError(bc.CustomerID, bc.CustomerIDBusregnumTinumStatus);
             }
 
             if (!string.IsNullOrWhiteSpace(bc.DisbursementDateMisMatch))
