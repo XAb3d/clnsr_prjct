@@ -2280,11 +2280,20 @@
     // Rule: if max tokens across both sides >= 3, need >= 2 matches.
     //       if max tokens across both sides <= 2, need >= 1 match.
     // Returns (matchCount, maxTokens, isSamePerson)
-    (int matches, int maxTokens, bool isSame) CompareNameTokens(
+    (int matches, int maxTokens, bool isSame, bool matchedViaFormatting) CompareNameTokens(
         string surname1, string firstName1, string middle1,
         string surname2, string firstName2, string middle2)
     {
-        HashSet<string> Tokenise(string s, string f, string m)
+        // Two tokenisation strategies per name:
+        //  - "split": hyphen/apostrophe/comma treated as token separators
+        //             (original behaviour) -- "Nyarko-Opoku" -> {NYARKO, OPOKU}
+        //  - "joined": those same characters treated as internal punctuation,
+        //             stripped but NOT splitting -- "Nyarko-Opoku" -> {NYARKOOPOKU}
+        // A hyphen/apostrophe/comma present in one submission and simply
+        // omitted in another is a common formatting inconsistency, not a
+        // different name. For names with none of those characters at all,
+        // split == joined, so this never weakens a genuine mismatch check.
+        HashSet<string> TokeniseSplit(string s, string f, string m)
         {
             var raw = $"{s} {f} {m}".ToUpperInvariant();
             return raw.Split(new[] { ' ', '-', '\'', '.', ',' },
@@ -2293,15 +2302,39 @@
                       .Where(t => t.Length > 0)
                       .ToHashSet();
         }
+        HashSet<string> TokeniseJoined(string s, string f, string m)
+        {
+            var raw = $"{s} {f} {m}".ToUpperInvariant();
+            return raw.Split(new[] { ' ', '.' },
+                             StringSplitOptions.RemoveEmptyEntries)
+                      .Select(t => new string(t.Where(char.IsLetter).ToArray()))
+                      .Where(t => t.Length > 0)
+                      .ToHashSet();
+        }
 
-        var tokens1 = Tokenise(surname1, firstName1, middle1);
-        var tokens2 = Tokenise(surname2, firstName2, middle2);
+        var split1 = TokeniseSplit(surname1, firstName1, middle1);
+        var split2 = TokeniseSplit(surname2, firstName2, middle2);
+        var joined1 = TokeniseJoined(surname1, firstName1, middle1);
+        var joined2 = TokeniseJoined(surname2, firstName2, middle2);
 
-        int matches   = tokens1.Count(t => tokens2.Contains(t));
-        int maxTokens = Math.Max(tokens1.Count, tokens2.Count);
-        bool isSame   = maxTokens >= 3 ? matches >= 2 : matches >= 1;
+        (int matches, int maxTokens) Score(HashSet<string> a, HashSet<string> b)
+            => (a.Count(t => b.Contains(t)), Math.Max(a.Count, b.Count));
 
-        return (matches, maxTokens, isSame);
+        bool IsSame(int matches, int maxTokens) => maxTokens >= 3 ? matches >= 2 : matches >= 1;
+
+        var rawScore = Score(split1, split2);
+        bool isSameRaw = IsSame(rawScore.matches, rawScore.maxTokens);
+
+        var best = new[] { rawScore, Score(split1, joined2), Score(joined1, split2), Score(joined1, joined2) }
+            .OrderByDescending(c => c.matches)
+            .First();
+        bool isSameBest = IsSame(best.matches, best.maxTokens);
+
+        // Only resolved once hyphen/apostrophe/comma formatting is accounted
+        // for -- the raw, as-submitted comparison alone would have failed.
+        bool matchedViaFormatting = !isSameRaw && isSameBest;
+
+        return (best.matches, best.maxTokens, isSameBest, matchedViaFormatting);
     }
 
     // ── GhanaCard / NatID format validator (Sprint 11) ───────────────────────
@@ -2448,7 +2481,7 @@
                 for (int j = i + 1; j < records.Count && !nameConflict; j++)
                 {
                     var a = records[i]; var b = records[j];
-                    var (matches, maxTokens, isSame) = CompareNameTokens(
+                    var (matches, maxTokens, isSame, _) = CompareNameTokens(
                         a.Surname?.Data ?? string.Empty,
                         a.FirstName?.Data ?? string.Empty,
                         a.MiddleNames?.Data ?? string.Empty,
@@ -2616,11 +2649,11 @@
             }
 
             // Step 2: Token name check
-            bool nameConflict12 = false; bool misspell12 = false;
+            bool nameConflict12 = false; bool misspell12 = false; bool viaFormatting12 = false;
             for (int i = 0; i < custGroups.Count && !nameConflict12; i++)
                 for (int j = i + 1; j < custGroups.Count && !nameConflict12; j++)
                 {
-                    var (matches12, _, isSame12) = CompareNameTokens(
+                    var (matches12, _, isSame12, formatting12) = CompareNameTokens(
                         custGroups[i].Surname?.Data    ?? string.Empty,
                         custGroups[i].FirstName?.Data  ?? string.Empty,
                         custGroups[i].MiddleNames?.Data ?? string.Empty,
@@ -2628,11 +2661,12 @@
                         custGroups[j].FirstName?.Data  ?? string.Empty,
                         custGroups[j].MiddleNames?.Data ?? string.Empty);
                     if (!isSame12) { nameConflict12 = true; misspell12 = matches12 > 0; }
+                    else if (formatting12) { viaFormatting12 = true; }
                 }
 
             string flag12 = nameConflict12
                 ? (misspell12 ? $"E:MISSPELL:{fieldSummary}" : $"E:NAME:{fieldSummary}")
-                : $"W:{fieldSummary}";
+                : (viaFormatting12 ? $"W:FORMATTING:{fieldSummary}" : $"W:{fieldSummary}");
             foreach (var entry in entries)
                 entry.Rec.SamePersonalIDDifferentCustomer = flag12;
         }
@@ -2654,11 +2688,11 @@
                 continue;
             }
 
-            bool nameConflict = false; bool misspellBlocking = false; bool misspellWarning = false;
+            bool nameConflict = false; bool misspellBlocking = false; bool misspellWarning = false; bool misspellFormatting = false;
             for (int i = 0; i < records.Count && !nameConflict; i++)
                 for (int j = i + 1; j < records.Count && !nameConflict; j++)
                 {
-                    var (matches, maxTokens, isSame) = CompareNameTokens(
+                    var (matches, maxTokens, isSame, viaFormatting) = CompareNameTokens(
                         records[i].Surname?.Data ?? string.Empty,
                         records[i].FirstName?.Data ?? string.Empty,
                         records[i].MiddleNames?.Data ?? string.Empty,
@@ -2671,6 +2705,14 @@
                         // blocking conflict, same as before.
                         nameConflict = true;
                         misspellBlocking = matches > 0;
+                    }
+                    else if (viaFormatting)
+                    {
+                        // Only resolved to a match once hyphen/apostrophe/comma
+                        // formatting was accounted for -- e.g. "Nyarko-Opoku"
+                        // vs "Nyarkoopoku". Not a mismatch, but worth a distinct
+                        // note rather than the generic misspelling warning.
+                        misspellFormatting = true;
                     }
                     else if (matches < maxTokens)
                     {
@@ -2687,6 +2729,10 @@
             {
                 string flag = misspellBlocking ? "E:MISSPELL" : "E";
                 foreach (var r in records) r.SameCustomerIDDifferentName = flag;
+            }
+            else if (misspellFormatting)
+            {
+                foreach (var r in records) r.SameCustomerIDDifferentName = "W:FORMATTING";
             }
             else if (misspellWarning)
             {
@@ -5769,7 +5815,14 @@
                 string prevNameNote = !string.IsNullOrWhiteSpace(individualRow.PreviousNameOnFile)
                     ? $" (PREVIOUS NAME ON FILE: {individualRow.PreviousNameOnFile})"
                     : string.Empty;
-                warningParts.Add($"POSSIBLE MISSPELLING — NAME NEARLY MATCHES PRIOR RECORD FOR THIS CUSTOMER ID{prevNameNote}");
+                if (individualRow.SameCustomerIDDifferentName.StartsWith("W:FORMATTING"))
+                {
+                    warningParts.Add($"NAME MATCHES PRIOR RECORD FOR THIS CUSTOMER ID ONCE HYPHEN/APOSTROPHE/COMMA FORMATTING IS ACCOUNTED FOR — NOT TREATED AS A MISMATCH{prevNameNote}");
+                }
+                else
+                {
+                    warningParts.Add($"POSSIBLE MISSPELLING — NAME NEARLY MATCHES PRIOR RECORD FOR THIS CUSTOMER ID{prevNameNote}");
+                }
             }
 
             // Reference name trust note (set by matcher or validation pass)
@@ -7198,8 +7251,14 @@
 
                 if (prefix == "W")
                 {
-                    // Same person, different CustomerIDs — CLEAN with warning
-                    var warningMsg = $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {fields} IS SHARED ACROSS MULTIPLE CUSTOMER IDS";
+                    // Same person, different CustomerIDs — CLEAN with warning.
+                    // "FORMATTING" is a distinct sub-case: names only matched
+                    // once hyphen/apostrophe/comma formatting was accounted
+                    // for -- worth a different note than the generic
+                    // "shared across customer IDs" duplicate-ID warning.
+                    var warningMsg = reason == "FORMATTING"
+                        ? $"{fields} SHARED ACROSS CUSTOMER IDS — NAMES MATCH ONCE HYPHEN/APOSTROPHE/COMMA FORMATTING IS ACCOUNTED FOR, NOT TREATED AS A MISMATCH"
+                        : $"POSSIBLE DUPLICATE CUSTOMER ID — SAME PERSON: {fields} IS SHARED ACROSS MULTIPLE CUSTOMER IDS";
                     ic.ReferenceNameTrustNote = string.IsNullOrWhiteSpace(ic.ReferenceNameTrustNote)
                         ? warningMsg : ic.ReferenceNameTrustNote + " | " + warningMsg;
                 }
