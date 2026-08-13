@@ -1933,6 +1933,31 @@
         // still triggering distinctTinums > 1 because it was never normalized.
         string NormReg(string? v) => (v ?? string.Empty).Trim().ToUpperInvariant();
 
+        // For judging whether two values are GENUINELY different, strip every
+        // non-alphanumeric character too -- e.g. "CA17,844" vs "CA17844" is a
+        // stray comma, not a different registration number, and shouldn't be
+        // counted as a conflict just because the raw strings don't match
+        // exactly. Messages below still display the original NormReg'd values
+        // (not this stripped form), so the formatting difference itself stays
+        // visible even though it isn't treated as a real conflict.
+        string NormRegStrict(string? v) => new string(NormReg(v).Where(char.IsLetterOrDigit).ToArray());
+
+        // Whether the group's business names confirm this is clearly the same
+        // business. Exactly one distinct name present -> agrees. Zero names to
+        // check, or genuinely different names -> can't confirm -- stay
+        // conservative (matches existing precedent from the Busregnum/Tinum
+        // grouping passes below, now applied consistently everywhere this
+        // question comes up).
+        bool NamesConfirmSameBusiness(IEnumerable<BusinessContext> grp)
+        {
+            var distinctBusinessNames = grp
+                .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
+                .Select(r => NormReg(r.Businessname.Data))
+                .Distinct()
+                .Count();
+            return distinctBusinessNames == 1;
+        }
+
         // 1) Group by CustomerID and check for conflicting Busregnum or Tinum
         var customerGroups = list
             .Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
@@ -1942,17 +1967,21 @@
         {
             var distinctBusregnums = grp
                 .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
-                .Select(r => NormReg(r.Busregnum.Data))
+                .Select(r => NormRegStrict(r.Busregnum.Data))
                 .Distinct()
                 .Count();
 
             var distinctTinums = grp
                 .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
-                .Select(r => NormReg(r.Tinum.Data))
+                .Select(r => NormRegStrict(r.Tinum.Data))
                 .Distinct()
                 .Count();
 
-            if (distinctBusregnums > 1 || distinctTinums > 1)
+            // Multiple registration numbers/TINs for the same customer, but
+            // clearly the same business (name agrees) -- most likely a
+            // corrected/updated ID over time, not a genuine identity
+            // conflict. Only flag when the names can't confirm that.
+            if ((distinctBusregnums > 1 || distinctTinums > 1) && !NamesConfirmSameBusiness(grp))
             {
                 // Name the actual conflicting values, not just "E" -- this is
                 // exactly what made it hard to trace which record/value was
@@ -1980,7 +2009,7 @@
         // 2) Group by Busregnum and check for conflicting CustomerID or Tinum
         var busregGroups = list
             .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
-            .GroupBy(r => NormReg(r.Busregnum.Data));
+            .GroupBy(r => NormRegStrict(r.Busregnum.Data));
 
         foreach (var grp in busregGroups)
         {
@@ -1992,7 +2021,7 @@
 
             var distinctTinums = grp
                 .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
-                .Select(r => NormReg(r.Tinum.Data))
+                .Select(r => NormRegStrict(r.Tinum.Data))
                 .Distinct()
                 .Count();
 
@@ -2003,18 +2032,14 @@
             // an exact Businessname match instead: same name across the group
             // -> legitimate, don't block. Different names, or no names to check
             // at all -> can't confirm it's the same business, stay conservative.
-            bool customerIdConflict = distinctCustomerIDs > 1;
-            if (customerIdConflict)
-            {
-                var distinctBusinessNames = grp
-                    .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
-                    .Select(r => NormReg(r.Businessname.Data))
-                    .Distinct()
-                    .Count();
-                customerIdConflict = distinctBusinessNames != 1;
-            }
+            // Same gate now also applied to "multiple TINs for this reg number"
+            // -- if it's clearly the same business, differing TINs read as an
+            // update/correction over time, not a genuine conflict.
+            bool namesConfirmSame = NamesConfirmSameBusiness(grp);
+            bool customerIdConflict = distinctCustomerIDs > 1 && !namesConfirmSame;
+            bool tinumConflict = distinctTinums > 1 && !namesConfirmSame;
 
-            if (customerIdConflict || distinctTinums > 1)
+            if (customerIdConflict || tinumConflict)
             {
                 var conflictParts = new List<string>();
                 if (customerIdConflict)
@@ -2023,13 +2048,13 @@
                         .Select(r => NormalizeCustomerId(r.CustomerID.Data)).Distinct();
                     conflictParts.Add($"CUSTOMER ID(S) {string.Join(", ", custIdList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS");
                 }
-                if (distinctTinums > 1)
+                if (tinumConflict)
                 {
                     var tinList = grp.Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
                         .Select(r => NormReg(r.Tinum.Data)).Distinct();
-                    conflictParts.Add($"MULTIPLE TINS {string.Join(", ", tinList)}");
+                    conflictParts.Add($"MULTIPLE TINS {string.Join(", ", tinList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS");
                 }
-                var msg = $"REGISTRATION NUMBER {grp.Key} IS SHARED WITH {string.Join(" AND ", conflictParts)}";
+                var msg = $"REGISTRATION NUMBER {NormReg(grp.First().Busregnum?.Data)} IS SHARED WITH {string.Join(" AND ", conflictParts)}";
                 foreach (var rec in grp)
                     rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
                         ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
@@ -2039,7 +2064,7 @@
         // 3) Group by Tinum and check for conflicting CustomerID or Busregnum
         var tinumGroups = list
             .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
-            .GroupBy(r => NormReg(r.Tinum.Data));
+            .GroupBy(r => NormRegStrict(r.Tinum.Data));
 
         foreach (var grp in tinumGroups)
         {
@@ -2051,24 +2076,19 @@
 
             var distinctBusregnums = grp
                 .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
-                .Select(r => NormReg(r.Busregnum.Data))
+                .Select(r => NormRegStrict(r.Busregnum.Data))
                 .Distinct()
                 .Count();
 
-            // Same reasoning as section 2 -- same Tinum, different CustomerIDs,
-            // can legitimately be the same business registered per branch.
-            bool customerIdConflict = distinctCustomerIDs > 1;
-            if (customerIdConflict)
-            {
-                var distinctBusinessNames = grp
-                    .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
-                    .Select(r => NormReg(r.Businessname.Data))
-                    .Distinct()
-                    .Count();
-                customerIdConflict = distinctBusinessNames != 1;
-            }
+            // Same reasoning as section 2 -- same Tinum, different CustomerIDs
+            // or different Busregnums, can legitimately be the same business
+            // (registered per branch, or a corrected registration number)
+            // when the business name confirms it.
+            bool namesConfirmSame = NamesConfirmSameBusiness(grp);
+            bool customerIdConflict = distinctCustomerIDs > 1 && !namesConfirmSame;
+            bool busregConflict = distinctBusregnums > 1 && !namesConfirmSame;
 
-            if (customerIdConflict || distinctBusregnums > 1)
+            if (customerIdConflict || busregConflict)
             {
                 var conflictParts = new List<string>();
                 if (customerIdConflict)
@@ -2077,13 +2097,13 @@
                         .Select(r => NormalizeCustomerId(r.CustomerID.Data)).Distinct();
                     conflictParts.Add($"CUSTOMER ID(S) {string.Join(", ", custIdList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS");
                 }
-                if (distinctBusregnums > 1)
+                if (busregConflict)
                 {
                     var regList = grp.Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
                         .Select(r => NormReg(r.Busregnum.Data)).Distinct();
-                    conflictParts.Add($"MULTIPLE REGISTRATION NUMBERS {string.Join(", ", regList)}");
+                    conflictParts.Add($"MULTIPLE REGISTRATION NUMBERS {string.Join(", ", regList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS");
                 }
-                var msg = $"TIN {grp.Key} IS SHARED WITH {string.Join(" AND ", conflictParts)}";
+                var msg = $"TIN {NormReg(grp.First().Tinum?.Data)} IS SHARED WITH {string.Join(" AND ", conflictParts)}";
                 foreach (var rec in grp)
                     rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
                         ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
@@ -6201,6 +6221,21 @@
             bc.Sectorindcode.Data = sectorindcode_subsecindcode[0];
             bc.Subsecindcode.Data = sectorindcode_subsecindcode[1];
 
+            // Expand known business-name abbreviations (e.g. "ENT" -> "ENTERPRISE",
+            // via the shortForms mapping managed on the Business Names Normalizer
+            // admin page) BEFORE the keyword-validity checks just below --
+            // previously this ran much later in the method, so a name like
+            // "VISION & SPORTS ENT" was checked against the keyword list in its
+            // raw, unexpanded form and failed, with the (too-late) expansion to
+            // "ENTERPRISE" only happening afterward. Admin-managed mappings had
+            // effectively no effect on cleaning as a result.
+            bc.Businessname.Data = ConvertBusinessShortFormToLongForm(bc.Businessname.Data);
+            bc.Tradingname.Data = ConvertBusinessShortFormToLongForm(bc.Tradingname.Data);
+            bc.NameOfComGuarantor1.Data = ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor1.Data);
+            bc.NameOfComGuarantor2.Data = ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor2.Data);
+            bc.NameOfComGuarantor3.Data = ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor3.Data);
+            bc.NameOfComGuarantor4.Data = ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor4.Data);
+
             var bName = FilterBusinessKeywords(bc.Businessname.Data);
             if (string.IsNullOrWhiteSpace(bName))
             {
@@ -6556,16 +6591,6 @@
             bc.G4Surname.Data = surname_Nature_NameGuarantor4._surname;
             bc.NatureOfGuarantor4.Data = surname_Nature_NameGuarantor4._natureOfComGua;
             bc.NameOfComGuarantor4.Data = surname_Nature_NameGuarantor4._nameOfComGuaran;
-
-            bc.Businessname.Data = ConvertBusinessShortFormToLongForm(bc.Businessname.Data);
-            bc.Tradingname.Data = ConvertBusinessShortFormToLongForm(bc.Tradingname.Data);
-            bc.NameOfComGuarantor1.Data = ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor1.Data);
-            bc.NameOfComGuarantor2.Data = ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor2.Data);
-            bc.NameOfComGuarantor3.Data = ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor3.Data);
-            bc.NameOfComGuarantor4.Data = ConvertBusinessShortFormToLongForm(bc.NameOfComGuarantor4.Data);
-
-
-
 
             var _mDate = stringHelper.CheckDate(bc.MaturityDate.Data);
             var _dDate = stringHelper.CheckDate(bc.DisbursementDate.Data);
@@ -7082,6 +7107,13 @@
             ic.G4Add3 = g4Add[2];
 
             //NameOfComGuarantor
+            // Expand known abbreviations first (see matching fix on the Business
+            // side) -- previously this ran much later (after the keyword check
+            // below), so an unrecognized abbreviation like "ENT" caused
+            // NameOfComGuarantor to be wiped to empty here before it ever got
+            // the chance to expand to "ENTERPRISE".
+            ic.NameOfComGuarantor.Data = ConvertBusinessShortFormToLongForm(ic.NameOfComGuarantor.Data);
+
             var NCG1 = FilterBusinessKeywords(ic.NameOfComGuarantor.Data);
             if (string.IsNullOrWhiteSpace(NCG1))
             {
@@ -7256,8 +7288,6 @@
             ic.NatureOfGuarantor.Data = surname_Nature_NameGuarantor._natureOfComGua;
             ic.NameOfComGuarantor.Data = surname_Nature_NameGuarantor._nameOfComGuaran;
 
-
-            ic.NameOfComGuarantor.Data = ConvertBusinessShortFormToLongForm(ic.NameOfComGuarantor.Data);
             //BMMATCHING
 
             if (ic != null && ic.DisburStatus != null && ic.DisbursementDate != null)
@@ -7489,6 +7519,11 @@
             bcDud.Sectorindcode.Data = sectorindcode_subsecindcode[0];
             bcDud.Subsecindcode.Data = sectorindcode_subsecindcode[1];
 
+            // Expand known abbreviations before the keyword-validity check --
+            // same ordering fix as the main BUS path above.
+            bcDud.Businessname.Data = ConvertBusinessShortFormToLongForm(bcDud.Businessname.Data);
+            bcDud.Tradingname.Data = ConvertBusinessShortFormToLongForm(bcDud.Tradingname.Data);
+
             var bName = FilterBusinessKeywords(bcDud.Businessname.Data);
             if (string.IsNullOrWhiteSpace(bName))
             {
@@ -7563,11 +7598,6 @@
 
             if (bcDud.Officetel1.Data == bcDud.Officetel2.Data) { bcDud.Officetel2.Data = string.Empty; }
 
-
-
-
-            bcDud.Businessname.Data = ConvertBusinessShortFormToLongForm(bcDud.Businessname.Data);
-            bcDud.Tradingname.Data = ConvertBusinessShortFormToLongForm(bcDud.Tradingname.Data);
 
 
             bcDud.ChequeNumber.Data = bcDud.CustomerID.Data + bcDud.ChequeNumber.Data;
