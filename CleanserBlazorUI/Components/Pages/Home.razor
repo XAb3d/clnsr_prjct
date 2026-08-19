@@ -3038,6 +3038,16 @@
     // Businessname/Busregnum for BUS) -- if those disagree, something's
     // actually wrong and it should fall through to normal handling instead of
     // being silently filed away as "just a closed repeat."
+    // "C", "P", and "T" are all closed statuses (see the existing precedent at
+    // the FacilityStatusCode checks elsewhere in this file) -- not just "C".
+    bool IsClosedFacilityStatus(string? code)
+    {
+        var c = (code ?? string.Empty).Trim();
+        return string.Equals(c, "C", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(c, "P", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(c, "T", StringComparison.OrdinalIgnoreCase);
+    }
+
     List<IndividualContext> ExtractClosedFacilitiesInd(List<IndividualContext> cleanCandidates, List<IndividualRef> fromDatabase)
     {
         var closed = new List<IndividualContext>();
@@ -3058,8 +3068,8 @@
 
             if (!refIndex.TryGetValue(key, out var refRow)) continue;
 
-            bool refClosed = string.Equals((refRow.FacilityStatusCode ?? string.Empty).Trim(), "C", StringComparison.OrdinalIgnoreCase);
-            bool incomingClosed = string.Equals((record.FacilityStatusCode?.Data ?? string.Empty).Trim(), "C", StringComparison.OrdinalIgnoreCase);
+            bool refClosed = IsClosedFacilityStatus(refRow.FacilityStatusCode);
+            bool incomingClosed = IsClosedFacilityStatus(record.FacilityStatusCode?.Data);
             if (!refClosed || !incomingClosed) continue;
 
             bool dobMatches = string.IsNullOrWhiteSpace(refRow.DateOfBirth) ||
@@ -3097,8 +3107,8 @@
 
             if (!refIndex.TryGetValue(key, out var refRow)) continue;
 
-            bool refClosed = string.Equals((refRow.FacilityStatusCode ?? string.Empty).Trim(), "C", StringComparison.OrdinalIgnoreCase);
-            bool incomingClosed = string.Equals((record.FacilityStatusCode?.Data ?? string.Empty).Trim(), "C", StringComparison.OrdinalIgnoreCase);
+            bool refClosed = IsClosedFacilityStatus(refRow.FacilityStatusCode);
+            bool incomingClosed = IsClosedFacilityStatus(record.FacilityStatusCode?.Data);
             if (!refClosed || !incomingClosed) continue;
 
             // Business has no DOB/name equivalent to double-check against -- Businessname
