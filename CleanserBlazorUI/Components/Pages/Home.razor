@@ -6302,7 +6302,11 @@
                 }
 
             }
-            if (bc.CreditFacilityType.Data == "P")
+            // "W" (non-bank) is the Business-side default placeholder, unlike
+            // Individual's "P" -- checking against "P" here meant this never
+            // fired for a bank's raw "W", so banks stayed "W" instead of
+            // being upgraded to "X".
+            if (bc.CreditFacilityType.Data == "W")
             {
                 bc.CreditFacilityType.Data = isSubscriber_X_or_Y;
             }
