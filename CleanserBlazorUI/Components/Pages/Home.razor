@@ -1943,167 +1943,88 @@
         string NormRegStrict(string? v) => new string(NormReg(v).Where(char.IsLetterOrDigit).ToArray());
 
         // Whether the group's business names confirm this is clearly the same
-        // business. Exactly one distinct name present -> agrees. Zero names to
-        // check, or genuinely different names -> can't confirm -- stay
-        // conservative (matches existing precedent from the Busregnum/Tinum
-        // grouping passes below, now applied consistently everywhere this
-        // question comes up).
+        // business. A business can legitimately have several Customer IDs and
+        // even a corrected registration number/TIN over time -- none of that
+        // is inherently suspicious. What actually matters is whether a shared
+        // ID value belongs to a genuinely different business. Business names
+        // vary far more than person names (trading name vs registered name,
+        // "LTD" vs "LIMITED", punctuation), so this compares fuzzily -- the
+        // same hyphen/apostrophe/comma-tolerant token matching built for
+        // individual names -- rather than requiring exact string equality,
+        // which was the dominant cause of false-positive UNL flags here.
+        // Zero names to check, or genuinely (fuzzy) different names -> can't
+        // confirm -- stay conservative.
         bool NamesConfirmSameBusiness(IEnumerable<BusinessContext> grp)
         {
-            var distinctBusinessNames = grp
+            var distinctNames = grp
                 .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
                 .Select(r => NormReg(r.Businessname.Data))
                 .Distinct()
-                .Count();
-            return distinctBusinessNames == 1;
+                .ToList();
+
+            if (distinctNames.Count == 0) return false;
+            if (distinctNames.Count == 1) return true;
+
+            for (int i = 0; i < distinctNames.Count; i++)
+                for (int j = i + 1; j < distinctNames.Count; j++)
+                {
+                    var (_, _, isSame, _) = CompareNameTokens(distinctNames[i], string.Empty, string.Empty, distinctNames[j], string.Empty, string.Empty);
+                    if (!isSame) return false;
+                }
+            return true;
         }
 
-        // 1) Group by CustomerID and check for conflicting Busregnum or Tinum
-        var customerGroups = list
-            .Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
-            .GroupBy(r => NormalizeCustomerId(r.CustomerID.Data));
-
-        foreach (var grp in customerGroups)
-        {
-            var distinctBusregnums = grp
-                .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
-                .Select(r => NormRegStrict(r.Busregnum.Data))
-                .Distinct()
-                .Count();
-
-            var distinctTinums = grp
-                .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
-                .Select(r => NormRegStrict(r.Tinum.Data))
-                .Distinct()
-                .Count();
-
-            // Multiple registration numbers/TINs for the same customer, but
-            // clearly the same business (name agrees) -- most likely a
-            // corrected/updated ID over time, not a genuine identity
-            // conflict. Only flag when the names can't confirm that.
-            if ((distinctBusregnums > 1 || distinctTinums > 1) && !NamesConfirmSameBusiness(grp))
-            {
-                // Name the actual conflicting values, not just "E" -- this is
-                // exactly what made it hard to trace which record/value was
-                // the problem once there were many flagged at once.
-                var conflictParts = new List<string>();
-                if (distinctBusregnums > 1)
-                {
-                    var regList = grp.Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
-                        .Select(r => NormReg(r.Busregnum.Data)).Distinct();
-                    conflictParts.Add($"REGISTRATION NUMBERS {string.Join(", ", regList)}");
-                }
-                if (distinctTinums > 1)
-                {
-                    var tinList = grp.Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
-                        .Select(r => NormReg(r.Tinum.Data)).Distinct();
-                    conflictParts.Add($"TINS {string.Join(", ", tinList)}");
-                }
-                var msg = $"CUSTOMER ID {grp.Key} IS LINKED TO MULTIPLE {string.Join(" AND ", conflictParts)} — VERIFY WHICH IS CORRECT";
-                foreach (var rec in grp)
-                    rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
-                        ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
-            }
-        }
-
-        // 2) Group by Busregnum and check for conflicting CustomerID or Tinum
+        // Group by Busregnum and check for a genuinely different business
+        // (by name) sharing it, or multiple TINs under it without name
+        // agreement. Customer ID plurality is intentionally NOT checked here
+        // -- a business having several Customer IDs is normal, not a signal.
         var busregGroups = list
             .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
             .GroupBy(r => NormRegStrict(r.Busregnum.Data));
 
         foreach (var grp in busregGroups)
         {
-            var distinctCustomerIDs = grp
-                .Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
-                .Select(r => NormalizeCustomerId(r.CustomerID.Data))
-                .Distinct()
-                .Count();
-
             var distinctTinums = grp
                 .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
                 .Select(r => NormRegStrict(r.Tinum.Data))
                 .Distinct()
                 .Count();
 
-            // Different CustomerIDs sharing the same Busregnum can legitimately
-            // happen -- the same business registered separately per branch,
-            // each with its own CustomerID. Registration date isn't reliable
-            // enough to verify against (known inconsistencies), so fall back to
-            // an exact Businessname match instead: same name across the group
-            // -> legitimate, don't block. Different names, or no names to check
-            // at all -> can't confirm it's the same business, stay conservative.
-            // Same gate now also applied to "multiple TINs for this reg number"
-            // -- if it's clearly the same business, differing TINs read as an
-            // update/correction over time, not a genuine conflict.
             bool namesConfirmSame = NamesConfirmSameBusiness(grp);
-            bool customerIdConflict = distinctCustomerIDs > 1 && !namesConfirmSame;
             bool tinumConflict = distinctTinums > 1 && !namesConfirmSame;
 
-            if (customerIdConflict || tinumConflict)
+            if (tinumConflict)
             {
-                var conflictParts = new List<string>();
-                if (customerIdConflict)
-                {
-                    var custIdList = grp.Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
-                        .Select(r => NormalizeCustomerId(r.CustomerID.Data)).Distinct();
-                    conflictParts.Add($"CUSTOMER ID(S) {string.Join(", ", custIdList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS");
-                }
-                if (tinumConflict)
-                {
-                    var tinList = grp.Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
-                        .Select(r => NormReg(r.Tinum.Data)).Distinct();
-                    conflictParts.Add($"MULTIPLE TINS {string.Join(", ", tinList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS");
-                }
-                var msg = $"REGISTRATION NUMBER {NormReg(grp.First().Busregnum?.Data)} IS SHARED WITH {string.Join(" AND ", conflictParts)}";
+                var tinList = grp.Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
+                    .Select(r => NormReg(r.Tinum.Data)).Distinct();
+                var msg = $"REGISTRATION NUMBER {NormReg(grp.First().Busregnum?.Data)} IS SHARED WITH MULTIPLE TINS {string.Join(", ", tinList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS";
                 foreach (var rec in grp)
                     rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
                         ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
             }
         }
 
-        // 3) Group by Tinum and check for conflicting CustomerID or Busregnum
+        // Group by Tinum -- mirror of the Busregnum pass above.
         var tinumGroups = list
             .Where(r => r.Tinum != null && !string.IsNullOrWhiteSpace(r.Tinum.Data))
             .GroupBy(r => NormRegStrict(r.Tinum.Data));
 
         foreach (var grp in tinumGroups)
         {
-            var distinctCustomerIDs = grp
-                .Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
-                .Select(r => NormalizeCustomerId(r.CustomerID.Data))
-                .Distinct()
-                .Count();
-
             var distinctBusregnums = grp
                 .Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
                 .Select(r => NormRegStrict(r.Busregnum.Data))
                 .Distinct()
                 .Count();
 
-            // Same reasoning as section 2 -- same Tinum, different CustomerIDs
-            // or different Busregnums, can legitimately be the same business
-            // (registered per branch, or a corrected registration number)
-            // when the business name confirms it.
             bool namesConfirmSame = NamesConfirmSameBusiness(grp);
-            bool customerIdConflict = distinctCustomerIDs > 1 && !namesConfirmSame;
             bool busregConflict = distinctBusregnums > 1 && !namesConfirmSame;
 
-            if (customerIdConflict || busregConflict)
+            if (busregConflict)
             {
-                var conflictParts = new List<string>();
-                if (customerIdConflict)
-                {
-                    var custIdList = grp.Where(r => r.CustomerID != null && !string.IsNullOrEmpty(r.CustomerID.Data))
-                        .Select(r => NormalizeCustomerId(r.CustomerID.Data)).Distinct();
-                    conflictParts.Add($"CUSTOMER ID(S) {string.Join(", ", custIdList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS");
-                }
-                if (busregConflict)
-                {
-                    var regList = grp.Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
-                        .Select(r => NormReg(r.Busregnum.Data)).Distinct();
-                    conflictParts.Add($"MULTIPLE REGISTRATION NUMBERS {string.Join(", ", regList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS");
-                }
-                var msg = $"TIN {NormReg(grp.First().Tinum?.Data)} IS SHARED WITH {string.Join(" AND ", conflictParts)}";
+                var regList = grp.Where(r => r.Busregnum != null && !string.IsNullOrWhiteSpace(r.Busregnum.Data))
+                    .Select(r => NormReg(r.Busregnum.Data)).Distinct();
+                var msg = $"TIN {NormReg(grp.First().Tinum?.Data)} IS SHARED WITH MULTIPLE REGISTRATION NUMBERS {string.Join(", ", regList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS";
                 foreach (var rec in grp)
                     rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
                         ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
@@ -6310,6 +6231,19 @@
 
             if (bc.Bustype.Data == "SOLE PROPRIETORSHIP" || bc.Bustype.Data == "A")
             {
+                // Lock in the value right here, immediately before it can be
+                // cleared below -- regardless of whatever OldData already
+                // holds from upstream processing, this guarantees the last
+                // known value survives for UNL display. The Clean sheet is
+                // unaffected either way (WriteRow<T> only falls back to
+                // OldData when routing to Unloadable, per the "!isSlean"
+                // branch) -- this only matters for what an analyst sees
+                // without needing to open the raw file.
+                if (busregnum_isGhanacard.thisIsAGhanaCard || busregnum_isGhanacard.hasSixUniqueCharactersCharacters)
+                    bc.Busregnum.OldData = bc.Busregnum.Data;
+                if (tinum_isGhanacard.thisIsAGhanaCard || tinum_isGhanacard.hasSixUniqueCharactersCharacters)
+                    bc.Tinum.OldData = bc.Tinum.Data;
+
                 //Remove Ghana card
                 if (busregnum_isGhanacard.thisIsAGhanaCard)
                 {
