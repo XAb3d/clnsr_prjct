@@ -3734,7 +3734,6 @@
                         mainMatcherTransformer_temp = forCrossChecksInd.Except(referenceVirtualsInd).ToList();
                         mainMatcherTransformer = mainMatcherTransformer_temp;
                         correctDateOfBirth = _correctDateOfBirth;
-                        dobIssues = _dobIssues;
                         matchdata = _matchdata;
                         newdata = _newdata;
                         duplicateCount = _duplicateCount;
@@ -3748,6 +3747,23 @@
                         // subset is whatever in mainMatcherTransformer fails
                         // ISCleaned; that's what the UNL sheet itself actually shows.
                         _lastUnlBatchInd = mainMatcherTransformer.Where(r => !ISCleaned(r)).ToList();
+
+                        // DOBISSUES count: computed here rather than taken from the
+                        // matcher's return value, since that older count only
+                        // reflected one of two DOB-mismatch detection paths (see
+                        // the #14 cross-record check above) and could undercount --
+                        // a record whose disbursement date also didn't match on
+                        // file would skip the matcher's own DOB comparison entirely,
+                        // yet still end up flagged for a DOB mismatch by #14. This
+                        // counts every record ISCleaned() actually flagged for it,
+                        // by the same two messages #14 produces, so the number
+                        // shown matches what's visible in the Errors column.
+                        dobIssues = mainMatcherTransformer.Count(r =>
+                            r.DateOfBirth?.Errors != null &&
+                            r.DateOfBirth.Errors.Any(e =>
+                                e.StartsWith("DATE OF BIRTH DOES NOT MATCH PREVIOUS SUBMISSION") ||
+                                e == "CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT DATES OF BIRTH")
+                        ).ToString();
                         _lastDuplicateCountInd = _duplicatesInd?.Count ?? 0;
                         _lastTotalRecordsInd = mainMatcherTransformer.Count + _lastDuplicateCountInd;
                         _lastUnlFilename = filename;
@@ -8101,12 +8117,14 @@
             {
                 ic.ReasonForWrittenOff.Data = string.Empty;
             }
-            //RM
-            if (!string.IsNullOrWhiteSpace(ic.Status))
-            {
-                ic.DateOfBirth.Passed = false;
-                ic.DateOfBirth.Errors = new List<string>() { "DATE OF BIRTH DOES NOT MATCH PREVIOUS SUBMISSION" };
-            }
+            // NOTE: the old bare "DATE OF BIRTH DOES NOT MATCH PREVIOUS
+            // SUBMISSION" check that used to live here (gated on ic.Status)
+            // has been removed -- it was redundant with the #14 cross-record
+            // DOB check further down, which reliably catches every case this
+            // covered (via the virtual reference records injected earlier)
+            // and produces a more informative message. Having both meant
+            // some records showed the same fact twice, pipe-joined, with the
+            // second copy adding no new information.
 
 
             var surname_Nature_NameGuarantor = Surname_Nature_NameOfComGuarantorNormalizer(ic.G1Surname.Data, ic.NatureOfGuarantor.Data, ic.NameOfComGuarantor.Data);
