@@ -2044,7 +2044,7 @@ public class StringHelper
         name = name.Replace("_", " ").Replace("_", " ").Replace(",", "").Replace("`", "");
         foreach (char c in name)
         {
-            if (!(char.IsLetter(c) || c == '.' || c == ' ' || c == '-'))
+            if (!(char.IsLetter(c) || c == '.' || c == ' ' || c == '-' || c == '\''))
             {
                 return true; // Found an invalid character
             }
@@ -2052,6 +2052,32 @@ public class StringHelper
 
         return false;
     }//.RemoveBusinessKeywords
+    /// <summary>
+    /// Names legitimately contain apostrophes (e.g. "N'ditu"), but the
+    /// character people actually type/paste varies -- a straight apostrophe
+    /// from direct entry, or one of several Unicode "smart quote" variants
+    /// that Word/Excel autocorrect silently substitutes as people type.
+    /// Without normalizing these to one canonical character up front, the
+    /// same name submitted in two different files (or entered once, then
+    /// resubmitted after being registered) could tokenize differently
+    /// downstream and silently defeat name-matching (e.g. the reference-
+    /// trust comparison), even though ContainsInvalidCharacters now accepts
+    /// all of these variants. Canonical form is the plain straight
+    /// apostrophe (U+0027), since that's what ContainsInvalidCharacters and
+    /// the rest of the name-comparison logic already expect.
+    /// </summary>
+    public string NormalizeApostrophes(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return name;
+        return name
+            .Replace('\u2018', '\'')  // ‘ LEFT SINGLE QUOTATION MARK
+            .Replace('\u2019', '\'')  // ’ RIGHT SINGLE QUOTATION MARK (most common autocorrect result)
+            .Replace('\u02BC', '\'')  // ʼ MODIFIER LETTER APOSTROPHE
+            .Replace('\u02BB', '\'')  // ʻ MODIFIER LETTER TURNED COMMA
+            .Replace('\u00B4', '\'')  // ´ ACUTE ACCENT
+            .Replace('\u2032', '\'')  // ′ PRIME
+            .Replace('`', '\'');      // GRAVE ACCENT / backtick
+    }
     public bool HasInvalidCharacters(string surname, string firstName, string middleName)
     {
         return ContainsInvalidCharacters(surname) || ContainsInvalidCharacters(firstName) || ContainsInvalidCharacters(middleName);
@@ -2256,6 +2282,9 @@ public class StringHelper
     }
     public CellDataAndStatus[] Surname_FirtName_MiddleName_Garantor(string surname, string firsname, string middlename)
     {
+        surname = NormalizeApostrophes(surname);
+        firsname = NormalizeApostrophes(firsname);
+        middlename = NormalizeApostrophes(middlename);
         CellDataAndStatus[] cds = [new CellDataAndStatus(surname), new CellDataAndStatus(firsname), new CellDataAndStatus(middlename)];
 
         //if (ContainsRestrictedWord(surname) || ContainsRestrictedWord(firsname) || ContainsRestrictedWord(middlename))
@@ -2293,6 +2322,9 @@ public class StringHelper
     //5. ProcessFullNames
     public CellDataAndStatus[] Surname_FirtName_MiddleName(string surname, string firsname, string middlename)
     {
+        surname = NormalizeApostrophes(surname);
+        firsname = NormalizeApostrophes(firsname);
+        middlename = NormalizeApostrophes(middlename);
         CellDataAndStatus[] cds = [new CellDataAndStatus(surname), new CellDataAndStatus(firsname), new CellDataAndStatus(middlename)];
 
         //if (ContainsRestrictedWord(surname) || ContainsRestrictedWord(firsname) || ContainsRestrictedWord(middlename))
