@@ -2109,15 +2109,38 @@
                 .Select(r => NormRegStrict(r.Tinum.Data))
                 .Distinct()
                 .Count();
+            var distinctNamesCountBusreg = grp
+                .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
+                .Select(r => NormReg(r.Businessname.Data))
+                .Distinct()
+                .Count();
 
             bool namesConfirmSame = NamesConfirmSameBusiness(grp, out bool matchedViaFuzzy);
             bool tinumConflict = distinctTinums > 1 && !namesConfirmSame;
+            // A name mismatch alone is sufficient -- don't require a second,
+            // competing Tinum as corroboration. Previously a group like one
+            // record with Tinum left blank and a genuinely different-named
+            // business sharing the Busregnum would never get flagged here,
+            // since distinctTinums never crossed 1 -- even though
+            // namesConfirmSame had already correctly determined they're
+            // different businesses. Mirrors the CustomerID pass above, which
+            // never required a second corroborating ID either.
+            bool namesOnlyConflictBusreg = !tinumConflict && distinctNamesCountBusreg > 1 && !namesConfirmSame;
 
             if (tinumConflict)
             {
                 var tinList = grp.Where(r => IsValidBusinessIdValue(r.Tinum?.Data))
                     .Select(r => NormReg(r.Tinum.Data)).Distinct();
                 var msg = $"REGISTRATION NUMBER {NormReg(grp.First().Busregnum?.Data)} IS SHARED WITH MULTIPLE TINS {string.Join(", ", tinList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS";
+                foreach (var rec in grp)
+                    rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
+                        ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
+            }
+            else if (namesOnlyConflictBusreg)
+            {
+                var nameList = grp.Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
+                    .Select(r => NormReg(r.Businessname.Data)).Distinct();
+                var msg = $"REGISTRATION NUMBER {NormReg(grp.First().Busregnum?.Data)} IS LINKED TO DIFFERENT BUSINESSES: {string.Join(", ", nameList)} — VERIFY WHICH IS CORRECT";
                 foreach (var rec in grp)
                     rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
                         ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
@@ -2142,15 +2165,33 @@
                 .Select(r => NormRegStrict(r.Busregnum.Data))
                 .Distinct()
                 .Count();
+            var distinctNamesCountTinum = grp
+                .Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
+                .Select(r => NormReg(r.Businessname.Data))
+                .Distinct()
+                .Count();
 
             bool namesConfirmSame = NamesConfirmSameBusiness(grp, out bool matchedViaFuzzy);
             bool busregConflict = distinctBusregnums > 1 && !namesConfirmSame;
+            // Same reasoning as the Busregnum pass above -- a name mismatch
+            // alone is sufficient, doesn't need a second competing Busregnum
+            // as corroboration.
+            bool namesOnlyConflictTinum = !busregConflict && distinctNamesCountTinum > 1 && !namesConfirmSame;
 
             if (busregConflict)
             {
                 var regList = grp.Where(r => IsValidBusinessIdValue(r.Busregnum?.Data))
                     .Select(r => NormReg(r.Busregnum.Data)).Distinct();
                 var msg = $"TIN {NormReg(grp.First().Tinum?.Data)} IS SHARED WITH MULTIPLE REGISTRATION NUMBERS {string.Join(", ", regList)} — BUSINESS NAMES DON'T MATCH, VERIFY THIS IS THE SAME BUSINESS";
+                foreach (var rec in grp)
+                    rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
+                        ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
+            }
+            else if (namesOnlyConflictTinum)
+            {
+                var nameList = grp.Where(r => r.Businessname != null && !string.IsNullOrWhiteSpace(r.Businessname.Data))
+                    .Select(r => NormReg(r.Businessname.Data)).Distinct();
+                var msg = $"TIN {NormReg(grp.First().Tinum?.Data)} IS LINKED TO DIFFERENT BUSINESSES: {string.Join(", ", nameList)} — VERIFY WHICH IS CORRECT";
                 foreach (var rec in grp)
                     rec.CustomerIDBusregnumTinumStatus = string.IsNullOrWhiteSpace(rec.CustomerIDBusregnumTinumStatus)
                         ? msg : rec.CustomerIDBusregnumTinumStatus + " | " + msg;
