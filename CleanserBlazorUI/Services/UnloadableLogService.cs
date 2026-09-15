@@ -59,14 +59,20 @@ namespace CleanserBlazorUI.Services
             ("DIFFERENT GHANA CARD", new[] { ("Demographic", "ID Number") }),
             ("INVALID NATIONAL ID FORMAT", new[] { ("Demographic", "ID Number") }),
             ("SEQUENTIAL PLACEHOLDER VALUE", new[] { ("Demographic", "ID Number") }),
+            ("APPEARS TO BE A CATEGORY LABEL", new[] { ("Demographic", "ID Number") }),
+            ("SHARED ACROSS MULTIPLE CUSTOMER IDS WITH SAME DOB", new[] { ("Demographic", "ID Number") }),
 
             // ── Demographic: Business Registration Number / TIN ─────────────
             ("Empty or Invalid Busregnum or Tinum", new[] { ("Demographic", "Business Registration Number / TIN") }),
             ("BUSREGNUM: CONTAIN INVALID CHARACTERS", new[] { ("Demographic", "Business Registration Number / TIN") }),
             ("TINUM: CONTAIN INVALID CHARACTERS", new[] { ("Demographic", "Business Registration Number / TIN") }),
             ("cannot be a Ghana card or contains", new[] { ("Demographic", "Business Registration Number / TIN") }),
-            ("SAME BUSINESS REGISTRATION NUMBER OR TIN", new[] { ("Demographic", "Business Registration Number / TIN") }),
+            ("IS LINKED TO DIFFERENT BUSINESSES", new[] { ("Demographic", "Business Registration Number / TIN") }),
+            ("IS SHARED WITH MULTIPLE TINS", new[] { ("Demographic", "Business Registration Number / TIN") }),
+            ("IS SHARED WITH MULTIPLE REGISTRATION NUMBERS", new[] { ("Demographic", "Business Registration Number / TIN") }),
             ("ALL-NUMERIC REGISTRATION NUMBER", new[] { ("Demographic", "Business Registration Number / TIN") }),
+            ("ALL-NUMERIC TIN", new[] { ("Demographic", "Business Registration Number / TIN") }),
+            ("APPEARS TO BE A PLACEHOLDER OR CATEGORY LABEL", new[] { ("Demographic", "Business Registration Number / TIN") }),
 
             // ── Financial: Facility Account Number ──────────────────────────
             ("CREDITFACILITYACCNUM: CONTAIN INVALID CHARACTERS", new[] { ("Financial", "Facility Account Number") }),
@@ -98,7 +104,11 @@ namespace CleanserBlazorUI.Services
             ("DISBURSEMENT DATE CANNOT BE GREATER THAN MATURITY DATE", new[] { ("FacilitySubmission", "Disbursement Date") }),
             ("DISBURSEMENT DATE CANNOT BE GREATER THAN SUBMISSION DATE", new[] { ("FacilitySubmission", "Disbursement Date") }),
             ("DUPLICATE WITH SAME OR DIFFERENT DATE OF DISBURSEMENTDATE", new[] { ("FacilitySubmission", "Disbursement Date") }),
+            ("DUPLICATE WITH DIFFERENT DISBURSEMENT DATE", new[] { ("FacilitySubmission", "Disbursement Date") }),
+            ("DOES NOT MATCH THE PREVIOUS SUBMISSION", new[] { ("FacilitySubmission", "Disbursement Date") }),
+            ("DISBURSEMENT DATE YEAR", new[] { ("FacilitySubmission", "Disbursement Date") }),
             ("DisbursementDate is greater than the reporting period", new[] { ("FacilitySubmission", "Disbursement Date") }),
+            ("MATURITY DATE YEAR", new[] { ("FacilitySubmission", "Maturity Date") }),
         };
 
         private static readonly (string Category, string SubCategory)[] UncategorizedTarget =
