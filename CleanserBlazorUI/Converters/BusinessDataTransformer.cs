@@ -1442,9 +1442,9 @@ public class BusinessDataTransformer
         }
         return cellData;
     }
-    public CellDataAndStatus G1Add1(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
-    public CellDataAndStatus G1Add2(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
-    public CellDataAndStatus G1Add3(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
+    public CellDataAndStatus G1Add1(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
+    public CellDataAndStatus G1Add2(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
+    public CellDataAndStatus G1Add3(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
     public CellDataAndStatus G1HomeTel(string data)
     {
         var cellData = new CellDataAndStatus(data);
@@ -1697,9 +1697,9 @@ public class BusinessDataTransformer
         }
 
     }
-    public CellDataAndStatus G2Add1(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
-    public CellDataAndStatus G2Add2(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
-    public CellDataAndStatus G2Add3(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
+    public CellDataAndStatus G2Add1(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
+    public CellDataAndStatus G2Add2(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
+    public CellDataAndStatus G2Add3(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
     public CellDataAndStatus G2HomeTel(string data)
     {
         var cellData = new CellDataAndStatus(data);
@@ -1766,9 +1766,9 @@ public class BusinessDataTransformer
         }
         return cellData;
     }
-    public CellDataAndStatus G3Add1(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
-    public CellDataAndStatus G3Add2(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
-    public CellDataAndStatus G3Add3(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
+    public CellDataAndStatus G3Add1(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
+    public CellDataAndStatus G3Add2(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
+    public CellDataAndStatus G3Add3(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
     public CellDataAndStatus G3HomeTel(string data)
     {
         var cellData = new CellDataAndStatus(data);
@@ -1835,9 +1835,9 @@ public class BusinessDataTransformer
         }
         return cellData;
     }
-    public CellDataAndStatus G4Add1(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
-    public CellDataAndStatus G4Add2(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
-    public CellDataAndStatus G4Add3(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = data; return cellData; }
+    public CellDataAndStatus G4Add1(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
+    public CellDataAndStatus G4Add2(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
+    public CellDataAndStatus G4Add3(string data) { var cellData = new CellDataAndStatus(data); data = stringHelper.RemoveSystemErroNames(data); cellData.Data = stringHelper.BlankIfPhoneNumber(data); return cellData; }
     public CellDataAndStatus G4HomeTel(string data)
     {
         var cellData = new CellDataAndStatus(data);

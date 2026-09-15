@@ -107,7 +107,6 @@ namespace CleanserBlazorUI.Services
             ("DUPLICATE WITH DIFFERENT DISBURSEMENT DATE", new[] { ("FacilitySubmission", "Disbursement Date") }),
             ("DOES NOT MATCH THE PREVIOUS SUBMISSION", new[] { ("FacilitySubmission", "Disbursement Date") }),
             ("DISBURSEMENT DATE YEAR", new[] { ("FacilitySubmission", "Disbursement Date") }),
-            ("DisbursementDate is greater than the reporting period", new[] { ("FacilitySubmission", "Disbursement Date") }),
             ("MATURITY DATE YEAR", new[] { ("FacilitySubmission", "Maturity Date") }),
         };
 
