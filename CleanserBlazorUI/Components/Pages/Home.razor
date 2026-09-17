@@ -2943,7 +2943,11 @@
         foreach (var grp in byCustomerID.Values)
         {
             var records = grp.ToList();
-            if (records.Count < 2) continue;
+            // No minimum group size here -- a single row can conflict with
+            // itself if two of its own 7 ID columns both hold a different,
+            // fully-formed (13-char) GHA Card value. That's just as much a
+            // genuine identity conflict as the same thing spread across two
+            // rows sharing a CustomerID.
 
             // (fieldName, ghaValue, record) for every GHA-format ID across all 7 ID columns
             var ghaEntries = new List<(string Field, string Value, IndividualContext Rec)>();
@@ -8283,7 +8287,7 @@
             // ── #15: Same CustomerID — different GHA (Ghana Card) numbers ─────
             if (!string.IsNullOrWhiteSpace(ic.SameCustomerIDDifferentGhanaCard))
             {
-                const string ghaMsg = "CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT GHANA CARD (GHA) NUMBERS ACROSS RECORDS";
+                const string ghaMsg = "CUSTOMER ID CONFLICT: SAME CUSTOMER ID IS LINKED TO DIFFERENT GHANA CARD (GHA) NUMBERS";
                 AddCellError(ic.CustomerID, ghaMsg);
                 var ghaParts = ic.SameCustomerIDDifferentGhanaCard.Split(':');
                 var ghaFields = ghaParts.Length > 1 ? ghaParts[1] : string.Empty;
