@@ -7019,16 +7019,33 @@
                 }
             }
 
-            if (string.IsNullOrWhiteSpace(bName) && !businessNameValidatedByReference)
+            // SECOND EXCEPTION: FilterBusinessKeywords only checks this row's
+            // own raw text against the keyword list, with no abbreviation
+            // handling -- so a legitimately abbreviated name (e.g. "...ORG")
+            // can fail here even though NamesConfirmSameBusiness, upstream in
+            // CheckForChangesInCustomerIDBusregnumTinum, already expanded it
+            // (via the same Business Names Normalizer mappings) and confirmed
+            // it's the same business as another record on file or in
+            // reference history -- that's exactly what BusinessNameFuzzyMatchNote
+            // being set means. Without this, that confirmation was only ever
+            // surfaced as a warning and never actually trusted, so records
+            // still failed here for the same name the system had already
+            // recognized as valid.
+            bool businessNameValidatedByFuzzyMatch = !string.IsNullOrWhiteSpace(bc.BusinessNameFuzzyMatchNote);
+
+            if (string.IsNullOrWhiteSpace(bName) && !businessNameValidatedByReference && !businessNameValidatedByFuzzyMatch)
             {
                 bc.Businessname.Passed = false;
                 bc.Businessname.Errors = new List<string>() { " Invalid Business Name " };
             }
-            else if (businessNameValidatedByReference && string.IsNullOrWhiteSpace(bName))
+            else if ((businessNameValidatedByReference || businessNameValidatedByFuzzyMatch) && string.IsNullOrWhiteSpace(bName))
             {
-                // Name only passed because of reference trust -- note it in the
-                // WARNING column so associates know why, same as IND.
-                if (string.IsNullOrWhiteSpace(bc.ReferenceNameTrustNote))
+                // Name only passed because of reference trust or a confirmed
+                // fuzzy match -- note it in the WARNING column so associates
+                // know why, same as IND. BusinessNameFuzzyMatchNote already
+                // carries its own detail when that's the reason, so only add
+                // the generic reference-trust note when that's what applied.
+                if (businessNameValidatedByReference && string.IsNullOrWhiteSpace(bc.ReferenceNameTrustNote))
                     bc.ReferenceNameTrustNote = "REFERENCE MATCH — NAME ACCEPTED FROM PREVIOUS CLEAN";
             }
 
