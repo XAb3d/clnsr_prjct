@@ -145,6 +145,22 @@ dotnet ef database update --project CleanserBlazorUI/CleanserBlazorUI.csproj
 dotnet run --project CleanserBlazorUI/CleanserBlazorUI.csproj
 ```
 
+### SQL Server setup script
+
+If the target machine should be initialized from SQL Server Management Studio
+instead of running EF migrations, use the generated idempotent script:
+
+```
+database/setup-cleanser-database.sql
+```
+
+In SSMS, create or select the target database first, open the script in a query
+window connected to that database, and execute it. The script creates the
+schema and applies every migration that is not already recorded in
+`__EFMigrationsHistory`, so it can also be rerun safely against a partially
+updated database. It does not create the database itself or seed application
+users/reference data.
+
 > **`appsettings.json` is excluded from Git** (it holds your connection string). Always start from `appsettings.template.json` on a new machine -- never commit your own `appsettings.json`.
 
 #### What step 4 actually does
@@ -184,5 +200,7 @@ dotnet run --project CleanserMonitor/CleanserMonitor.AppHost
 ```
 
 ---
-
+* CleanserBlazorUI/Api/
+        CleanserBlazorUI/Engine/
+        database/* -- included for ckms to call clnsr
 *Maintained by AB3 Data Operations.*

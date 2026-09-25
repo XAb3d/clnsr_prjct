@@ -103,16 +103,14 @@
 
                         @if (isLoading)
                         {
-                            <p>Uploading...</p>
+                            <p>Checking selected file(s)...</p>
                         }
-                        else
-                        {
-                            <ul>
-                                @foreach (var file in spreadsheetFileAndChipColor)
-                                {
-                                    <MudChip T="String" IconColor="Color.Error" Color="file.SpreadsheetFileColor" OnClose="() => RemoveFile(file)">@file.SpreadsheetFile.Name</MudChip>
-                                }
-                            </ul>
+                        <ul>
+                            @foreach (var file in spreadsheetFileAndChipColor)
+                            {
+                                <MudChip T="String" IconColor="Color.Error" Color="file.SpreadsheetFileColor" OnClose="() => RemoveFile(file)">@file.SpreadsheetFile.Name</MudChip>
+                            }
+                        </ul>
                         }
                         @if (!string.IsNullOrEmpty(ErrorMessage))
                         {
@@ -822,12 +820,22 @@
     {
         Logger.LogInformation("File upload started with {FileCount} files.", e.GetMultipleFiles(MAX_FILES).Count);
         REF_ResetVariables();
+        numberofFileswithoutreference = 0;
         isLoading = true;
         GetErrorsPairsList.Clear();
 
 
         foreach (var browserFile in e.GetMultipleFiles(MAX_FILES))
         {
+            var selectedFile = new SpreadsheetFileAndChipColor
+            {
+                SpreadsheetFile = browserFile,
+                SpreadsheetFileColor = Color.Warning,
+                IsPassed = false,
+            };
+            spreadsheetFileAndChipColor.Add(selectedFile);
+            StateHasChanged();
+
             try
             {
                 var bbb = stringHelper.GetBusinessTypeFromFile(browserFile.Name);
@@ -837,16 +845,21 @@
                 //if (browserFile != null && extension == ".xlsx")
                 if (browserFile != null && extension == ".xlsx" && !string.IsNullOrWhiteSpace(shortname))
                 {
-                    spreadsheetFileAndChipColor.Add(new SpreadsheetFileAndChipColor { SpreadsheetFile = browserFile, SpreadsheetFileColor = Color.Primary, IsPassed = true });
+                    selectedFile.SpreadsheetFileColor = Color.Primary;
+                    selectedFile.IsPassed = true;
                 }
                 else
                 {
-                    spreadsheetFileAndChipColor.Add(new SpreadsheetFileAndChipColor { SpreadsheetFile = browserFile, SpreadsheetFileColor = Color.Error, IsPassed = false });
+                    selectedFile.SpreadsheetFileColor = Color.Error;
+                    selectedFile.IsPassed = false;
                     numberofFileswithoutreference++;
                 }
             }
             catch (Exception ex)
             {
+                selectedFile.SpreadsheetFileColor = Color.Error;
+                selectedFile.IsPassed = false;
+                numberofFileswithoutreference++;
                 Logger.LogError(ex, "Error processing file {FileName}", browserFile.Name);
             }
 
@@ -862,6 +875,7 @@
         StateHasChanged();
         currentFileCount = spreadsheetFileAndChipColor.Count;
         isLoading = false;
+        StateHasChanged();
         Logger.LogInformation("File upload finished. {ValidFiles} valid files, {InvalidFiles} invalid files.", spreadsheetFileAndChipColor.Count(f => f.IsPassed), spreadsheetFileAndChipColor.Count(f => !f.IsPassed));
     }
     void REF_RemoveFile(SpreadsheetFileAndChipColor file)
@@ -9241,7 +9255,6 @@
 
         foreach (var browserFile in e.GetMultipleFiles(MAX_FILES))
         {
-            spreadsheetFileAndChipColor.Clear();
             try
             {
                 var extension = Path.GetExtension(browserFile.Name);

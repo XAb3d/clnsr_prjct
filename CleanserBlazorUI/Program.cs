@@ -98,6 +98,7 @@ builder.Services.AddAuthorization(options =>
 
 builder.Services.AddScoped<ExcelProcessorService>();
 builder.Services.AddScoped<DataManagementService>();
+builder.Services.AddScoped<CleanserBlazorUI.Engine.CleanserEngine>();
 builder.Services.AddSingleton<FileCleanupSettingsService>();
 // Add SMTP configuration
 builder.Services.Configure<SmtpSettings>(builder.Configuration.GetSection("SmtpSettings"));
@@ -157,7 +158,9 @@ else
     app.UseMigrationsEndPoint();
 }
 
-app.UseHttpsRedirection();
+app.UseWhen(
+    ctx => !ctx.Request.Path.StartsWithSegments("/api"),
+    branch => branch.UseHttpsRedirection());
 
 app.MapStaticAssets();
 app.UseAntiforgery();
@@ -165,6 +168,7 @@ app.UseAntiforgery();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
+CleanserBlazorUI.Api.CleanEvaluateEndpoint.MapCleanEvaluate(app);
 
 app.MapAdditionalIdentityEndpoints();
 
