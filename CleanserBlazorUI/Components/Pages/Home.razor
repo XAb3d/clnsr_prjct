@@ -1872,7 +1872,35 @@
                         processedExcelRecords.Add(record);
                         continue;
                     }
-                    duplicatesList.Add(record); // Duplicates stored separately //
+
+                    // Duplicate found — compare CurBal to decide which to keep.
+                    // Mirrors the Individual matcher's tie-break exactly (was
+                    // previously missing here -- this branch always kept
+                    // whichever record was seen first, regardless of balance).
+                    decimal? incomingBal = ParseCurBal(record.CurBal?.Data);
+                    decimal? existingBal = ParseCurBal(existing.CurBal?.Data);
+
+                    bool keepIncoming;
+                    if (incomingBal.HasValue && existingBal.HasValue)
+                        keepIncoming = incomingBal.Value < existingBal.Value;  // lower wins
+                    else if (incomingBal.HasValue && !existingBal.HasValue)
+                        keepIncoming = true;   // known value beats blank
+                    else
+                        keepIncoming = false;  // existing wins if incoming is blank or equal
+
+                    if (keepIncoming)
+                    {
+                        // Swap: existing goes to duplicate sheet, incoming becomes the kept record
+                        duplicatesList.Add(existing);
+                        seenKeys[key] = record;
+                        var idx = processedExcelRecords.IndexOf(existing);
+                        if (idx >= 0) processedExcelRecords[idx] = record;
+                        else processedExcelRecords.Add(record);
+                    }
+                    else
+                    {
+                        duplicatesList.Add(record); // incoming loses — goes to duplicate sheet
+                    }
                 }
                 else
                 {
