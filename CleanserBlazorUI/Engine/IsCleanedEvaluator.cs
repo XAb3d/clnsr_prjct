@@ -1317,7 +1317,7 @@ public class IsCleanedEvaluator
                                 $"NATIONAL ID LINKED TO DIFFERENT DATES OF BIRTH — SAME {fields} CANNOT BELONG TO TWO DIFFERENT PEOPLE");
                         else if (reason == "MISSPELL")
                             AddCellError(ic.NatIDNum,
-                                $"NATIONAL ID CONFLICT: {fields} — NAMES PARTIALLY MATCH, POSSIBLE MISSPELLING — MANUAL REVIEW REQUIRED");
+                                $"NATIONAL ID CONFLICT: {fields} — NAMES PARTIALLY MATCH, POSSIBLE MISSPELLING — REVIEW REQUIRED");
                         else if (ic.SamePersonalIDDifferentCustomer.StartsWith("P"))
                         {
                             AddCellError(ic.CustomerID,
@@ -1396,7 +1396,7 @@ public class IsCleanedEvaluator
                             ? $" (CUSTOMER ID {custIdInConflict})"
                             : string.Empty;
                         string msg = misspell14
-                            ? $"CUSTOMER ID CONFLICT{custIdNote14}: NAME PARTIALLY MATCHES — POSSIBLE MISSPELLING — MANUAL REVIEW REQUIRED{prevNameNote14}{nameListNote14}"
+                            ? $"CUSTOMER ID CONFLICT{custIdNote14}: NAME PARTIALLY MATCHES — POSSIBLE MISSPELLING — REVIEW REQUIRED{prevNameNote14}{nameListNote14}"
                             : $"CUSTOMER ID CONFLICT{custIdNote14}: SAME CUSTOMER ID IS LINKED TO DIFFERENT NAMES ACROSS RECORDS{prevNameNote14}{nameListNote14} — VERIFY WHICH IS CORRECT";
                         AddCellError(ic.CustomerID, msg);
                         AddCellError(ic.Surname, msg);
