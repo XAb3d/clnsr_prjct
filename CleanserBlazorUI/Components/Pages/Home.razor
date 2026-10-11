@@ -2965,7 +2965,7 @@
         // ── #15: Same CustomerID — different GHA (Ghana Card) numbers ──────────
         // GHA Card numbers are meant to uniquely identify one person nationally,
         // so if the same CustomerID has two different GHA-format ID values on
-        // file -- regardless of which of the 7 ID columns each is filed under --
+        // file -- regardless of which of the 9 ID columns each is filed under --
         // that's a genuine identity conflict, not just a formatting quirk.
         // Restricted to GHA specifically (not other 3-letter country prefixes
         // like NGA/CIV) since only the Ghana Card carries that uniqueness
@@ -2986,12 +2986,12 @@
         {
             var records = grp.ToList();
             // No minimum group size here -- a single row can conflict with
-            // itself if two of its own 7 ID columns both hold a different,
+            // itself if two of its own 9 ID columns both hold a different,
             // fully-formed (13-char) GHA Card value. That's just as much a
             // genuine identity conflict as the same thing spread across two
             // rows sharing a CustomerID.
 
-            // (fieldName, ghaValue, record) for every GHA-format ID across all 7 ID columns
+            // (fieldName, ghaValue, record) for every GHA-format ID across all 9 ID columns
             var ghaEntries = new List<(string Field, string Value, IndividualContext Rec)>();
             foreach (var r in records)
             {
@@ -3007,6 +3007,14 @@
                 CheckGhaField(r.SSNum?.Data, "SSNum");
                 CheckGhaField(r.EzwichNum?.Data, "EzwichNum");
                 CheckGhaField(r.OtherIDNum?.Data, "OtherIDNum");
+                // Ghana Card numbers are routinely filed under TINum too (the
+                // Ghana Card number doubles as the individual TIN), and a
+                // GHA-format value can land in OtherIDType by data-entry slip.
+                // OtherIDType is a type label so it normally holds no value
+                // that parses as a Ghana Card -- scanning it costs nothing and
+                // closes the mis-entry case.
+                CheckGhaField(r.OtherIDType?.Data, "OtherIDType");
+                CheckGhaField(r.TINum?.Data, "TINum");
             }
 
             var distinctGhaValues = ghaEntries.Select(e => e.Value).Distinct().ToList();
@@ -8361,6 +8369,8 @@
                         case "SSNum": AddCellError(ic.SSNum, ghaMsg); break;
                         case "EzwichNum": AddCellError(ic.EzwichNum, ghaMsg); break;
                         case "OtherIDNum": AddCellError(ic.OtherIDNum, ghaMsg); break;
+                        case "OtherIDType": AddCellError(ic.OtherIDType, ghaMsg); break;
+                        case "TINum": AddCellError(ic.TINum, ghaMsg); break;
                     }
                 }
             }
