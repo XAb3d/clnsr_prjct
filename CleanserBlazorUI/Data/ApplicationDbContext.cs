@@ -16,6 +16,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     // (raw ADO.NET against [Subscriber].[Subscribers], no schema tracking)
     // into this EF-managed one. See GetShortCodeFromSubscribeIDAsync.
     public DbSet<SubscribeContext> SubscriberShortCodes { get; set; }
+    // Reviewer decisions on names flagged unloadable (approve / reject / revoke,
+    // with any correction and the identity anchors). See NameReviewLogEntry.
+    public DbSet<NameReviewLogEntry> NameReviewLog { get; set; }
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -45,5 +48,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .WithMany(h => h.CategoryDetails)
             .HasForeignKey(d => d.UnloadableLogHeaderId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        // Every cleaning run looks up decisions by subscriber + file kind +
+        // customer. Deliberately NOT unique: history is kept (approve ->
+        // revoke -> approve again is three rows).
+        builder.Entity<NameReviewLogEntry>()
+            .HasIndex(e => new { e.SubscriberCode, e.FileKind, e.CustomerId })
+            .HasDatabaseName("IX_NameReviewLog_Lookup");
     }
 }
