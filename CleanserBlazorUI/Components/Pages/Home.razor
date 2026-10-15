@@ -3791,6 +3791,10 @@
                         AlertSeverity = MudBlazor.Severity.Success;
                         AlertSeverityVisible = "d-block";
 
+                        // ── Name review: apply reviewer corrections, then resolve trust / veto ──
+                        var nameReviewIndexInd = await LoadNameReviewIndexAsync(NameReviewFileKind.Individual, filename);
+                        ApplyNameReviewCorrectionsInd(ExcelDataRecieved, nameReviewIndexInd);
+                        ApplyNameReviewTrustInd(ExcelDataRecieved, nameReviewIndexInd);
                         var RefData = await DataManagementService.GETReferenceData_IND(filename);
                         isSubscriber_X_or_Y = await DataManagementService.GetSubscribeX_or_Y(filename);
                         var (mainMatcherTransformer, _duplicatesInd, _correctDateOfBirth, _dobIssues, _matchdata, _newdata, _duplicateCount) = REF_MainMatcherTransformerInd_Clean_IND(RefData, ExcelDataRecieved);
@@ -3980,6 +3984,10 @@
                         AlertSeverity = MudBlazor.Severity.Success;
                         AlertSeverityVisible = "d-block";
 
+                        // ── Name review: apply reviewer corrections, then resolve trust / veto ──
+                        var nameReviewIndexBus = await LoadNameReviewIndexAsync(NameReviewFileKind.Business, filename);
+                        ApplyNameReviewCorrectionsBus(ExcelDataRecieved, nameReviewIndexBus);
+                        ApplyNameReviewTrustBus(ExcelDataRecieved, nameReviewIndexBus);
                         var RefData = await DataManagementService.GETReferenceData_BUS(filename);
                         var (mainMatcherTransformer, _duplicatesInd, _correctDateOfBirth, _dobIssues, _matchdata, _newdata, _duplicateCount) = REF_MainMatcherTransformerInd_Clean_BUS(RefData, ExcelDataRecieved);
                         // Fold reference in as virtual records so Businessname/Busregnum/Tinum
@@ -4282,6 +4290,103 @@
         }
         return new CleaningStatus();
     }
+    // ── Name review (see NameReviewLogEntry and Helpers/NameReviewTrust.cs) ─────────
+    // A registrar's decisions on flagged names are applied in two steps, right after the
+    // file is read and before anything else looks at the names:
+    //   1. corrections -- raw text a reviewer fixed is replaced with the corrected text, so it
+    //      goes through every normal check as if the subscriber had sent it correctly;
+    //   2. trust -- each record is marked Trusted (approved), Vetoed (rejected / revoked) or
+    //      neither, for ISCleaned to act on.
+    // Raw text is matched via CellDataAndStatus.OldData (the cell as submitted). The name key,
+    // DOB and ID anchors come from the record as it stands after the read -- the Name Review
+    // screen must capture them at the same point, with the same NameReviewText helpers.
+    async Task<NameReviewIndex> LoadNameReviewIndexAsync(string fileKind, string fileName)
+    {
+        try
+        {
+            var subscriberCode = await DataManagementService.GetFileShortCodeFromFileName(fileName);
+            var rows = await DataManagementService.GetNameReviewLogAsync(subscriberCode, fileKind);
+            return new NameReviewIndex(fileKind, rows, NormalizeCustomerId);
+        }
+        catch (Exception)
+        {
+            // Never let the review feature stop a cleaning run -- but say so: without the
+            // decisions, approved names will flag again and rejected ones won't be vetoed.
+            Snackbar.Add("Name review decisions could not be loaded; this run did not apply them.", MudBlazor.Severity.Warning);
+            return new NameReviewIndex(fileKind, Array.Empty<NameReviewLogEntry>(), NormalizeCustomerId);
+        }
+    }
+
+    static CellDataAndStatus KeepOldData(CellDataAndStatus corrected, CellDataAndStatus? original)
+    {
+        corrected.OldData = original?.OldData ?? corrected.OldData;   // the UNL sheet still shows what was submitted
+        return corrected;
+    }
+
+    static IEnumerable<string?> IndividualAnchorIdValues(IndividualContext ic) => new string?[]
+    {
+        ic.NatIDNum?.Data, ic.VotersIDNum?.Data, ic.DriverLicNum?.Data, ic.PassportNum?.Data, ic.SSNum?.Data,
+        ic.EzwichNum?.Data, ic.OtherIDType?.Data, ic.OtherIDNum?.Data, ic.TINum?.Data,
+    };
+
+    void ApplyNameReviewCorrectionsInd(List<IndividualContext> records, NameReviewIndex index)
+    {
+        var transformer = new IndividualDataTransformer();
+        foreach (var ic in records)
+        {
+            var fix = index.FindCorrection(ic.CustomerID?.Data, ic.Surname?.OldData, ic.FirstName?.OldData, ic.MiddleNames?.OldData);
+            if (fix == null) continue;
+            ic.Surname = KeepOldData(transformer.Surname(fix.CorrectedSurname), ic.Surname);
+            ic.FirstName = KeepOldData(transformer.FirstName(fix.CorrectedFirstName), ic.FirstName);
+            ic.MiddleNames = KeepOldData(transformer.MiddleNames(fix.CorrectedMiddleNames), ic.MiddleNames);
+        }
+    }
+
+    void ApplyNameReviewCorrectionsBus(List<BusinessContext> records, NameReviewIndex index)
+    {
+        var transformer = new BusinessDataTransformer();
+        foreach (var bc in records)
+        {
+            var fix = index.FindCorrection(bc.CustomerID?.Data, bc.Businessname?.OldData);
+            if (fix == null) continue;
+            // Re-run the normal transformer on the corrected text so its own checks (including the
+            // invalid-character one) judge the corrected name, not the submitted one.
+            bc.Businessname = KeepOldData(transformer.Businessname(fix.CorrectedBusinessName), bc.Businessname);
+        }
+    }
+
+    void ApplyNameReviewTrustInd(List<IndividualContext> records, NameReviewIndex index)
+    {
+        foreach (var ic in records)
+        {
+            var result = index.Evaluate(
+                ic.CustomerID?.Data,
+                NameReviewText.NameKey(ic.Surname?.Data, ic.FirstName?.Data, ic.MiddleNames?.Data),
+                NameReviewText.NormalizeDob(ic.DateOfBirth?.Data),
+                NameReviewText.BuildAnchorIds(IndividualAnchorIdValues(ic)));
+            ic.NameReviewTrusted = result.Decision == NameTrustDecision.Trusted;
+            ic.NameReviewVetoed = result.Decision == NameTrustDecision.Vetoed;
+            if (ic.NameReviewTrusted && string.IsNullOrWhiteSpace(ic.ReferenceNameTrustNote))
+                ic.ReferenceNameTrustNote = "NAME REVIEW — " + result.Reason;
+        }
+    }
+
+    void ApplyNameReviewTrustBus(List<BusinessContext> records, NameReviewIndex index)
+    {
+        foreach (var bc in records)
+        {
+            var result = index.Evaluate(
+                bc.CustomerID?.Data,
+                NameReviewText.NameKey(bc.Businessname?.Data),
+                string.Empty,
+                NameReviewText.BuildAnchorIds(new string?[] { bc.Busregnum?.Data, bc.Tinum?.Data }));
+            bc.NameReviewTrusted = result.Decision == NameTrustDecision.Trusted;
+            bc.NameReviewVetoed = result.Decision == NameTrustDecision.Vetoed;
+            if (bc.NameReviewTrusted && string.IsNullOrWhiteSpace(bc.ReferenceNameTrustNote))
+                bc.ReferenceNameTrustNote = "NAME REVIEW — " + result.Reason;
+        }
+    }
+
     async Task RunCleanser(int id)
     {
         correctDateOfBirth = dobIssues = matchdata = newdata = duplicateCount = "0";
@@ -7079,6 +7184,19 @@
             // recognized as valid.
             bool businessNameValidatedByFuzzyMatch = !string.IsNullOrWhiteSpace(bc.BusinessNameFuzzyMatchNote);
 
+            // Name review decisions (resolved before ISCleaned): a rejection / revocation is a hard
+            // veto over every trust path (reference, fuzzy match, approval); an approval counts
+            // like reference trust.
+            if (bc.NameReviewVetoed)
+            {
+                businessNameValidatedByReference = false;
+                businessNameValidatedByFuzzyMatch = false;
+            }
+            else if (bc.NameReviewTrusted)
+            {
+                businessNameValidatedByReference = true;
+            }
+
             if (string.IsNullOrWhiteSpace(bName) && !businessNameValidatedByReference && !businessNameValidatedByFuzzyMatch)
             {
                 bc.Businessname.Passed = false;
@@ -7884,6 +8002,13 @@
                 }
             }
 
+            // Name review decisions (resolved before ISCleaned). A reviewer's rejection / revocation
+            // overrides every trust path, including a name the reference would otherwise vouch for;
+            // an approval counts as trust. Special characters are never "trusted" -- those are
+            // corrected upstream and then judged like any other name.
+            if (ic.NameReviewVetoed) nameValidatedByReference = false;
+            else if (ic.NameReviewTrusted) nameValidatedByReference = true;
+
             if (!nameValidatedByReference && (ContainsRestrictedWord(ic.Surname.Data) || ContainsRestrictedWord(ic.FirstName.Data) || ContainsRestrictedWord(ic.MiddleNames.Data)))
             {
                 ic.Surname.Passed = false; ic.FirstName.Passed = false;
@@ -7908,23 +8033,26 @@
                     AddCellError(ic.Surname,
                         "INVALID NAME: BUSINESS KEYWORDS DETECTED IN INDIVIDUAL RECORD — USE COMMERCIAL FILE TYPE");
                 }
-
-                // ── Sprint 8: AND in IND name = multiple persons — unloadable ─
-                if (upperName.Contains(" AND ") || upperName.EndsWith(" AND"))
-                {
-                    ic.Surname.Passed = false;
-                    ic.FirstName.Passed = false;
-                    AddCellError(ic.Surname,
-                        "INVALID NAME: MULTIPLE INDIVIDUALS DETECTED — A FACILITY RECORD MUST BE ASSIGNED TO A SINGLE PERSON");
-                }
             }
             else
             {
-                // Name passed by reference — add a note in the WARNING column
+                // Name passed by reference or review — add a note in the WARNING column
                 // so associates know this record was trusted from last month's clean
                 if (string.IsNullOrWhiteSpace(ic.ReferenceNameTrustNote))
                     ic.ReferenceNameTrustNote = "REFERENCE MATCH — NAME ACCEPTED FROM PREVIOUS CLEAN";
             }
+
+            // AND in an individual's name means more than one person on one facility. That is a
+            // correct detection, not a judgement call, so NO trust path bypasses it -- the data has
+            // to be split into one record per person.
+            if (upperName.Contains(" AND ") || upperName.EndsWith(" AND"))
+            {
+                ic.Surname.Passed = false;
+                ic.FirstName.Passed = false;
+                AddCellError(ic.Surname,
+                    "INVALID NAME: MULTIPLE INDIVIDUALS DETECTED — A FACILITY RECORD MUST BE ASSIGNED TO A SINGLE PERSON");
+            }
+
 
             var proofOfAddType_proofOfAddNum = stringHelper.ProofOfAddType_ProofOfAddNum(ic.ProofOfAddType.Data, ic.ProofOfAddNum.Data);
             ic.ProofOfAddType = proofOfAddType_proofOfAddNum[0];
