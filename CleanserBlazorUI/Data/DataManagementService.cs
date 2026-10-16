@@ -462,6 +462,17 @@ public class DataManagementService
         return scc;
     }
     //Return only Shortname of a file
+    /// <summary>
+    /// Reviewer decisions for one subscriber and file kind (IND / BUS), read once per cleaning run
+    /// and indexed in memory -- see NameReviewIndex. The table is small (decisions, not records).
+    /// </summary>
+    public async Task<List<NameReviewLogEntry>> GetNameReviewLogAsync(string subscriberCode, string fileKind)
+    {
+        return await _context.NameReviewLog
+            .AsNoTracking()
+            .Where(e => e.SubscriberCode == subscriberCode && e.FileKind == fileKind)
+            .ToListAsync();
+    }
     public async Task<string> GetFileShortCodeFromFileName(string fileShortName)
     {
         var _filename = fileShortName.Split('_')[0];

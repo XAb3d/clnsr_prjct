@@ -24,8 +24,10 @@ namespace CleanserBlazorUI.Entities;
 ///    reference data still holds the name. (Reference rows are never deleted
 ///    to "undo" an approval -- dedup and DOB history depend on them.)
 ///
-/// History is kept: approve -> revoke -> approve again produces three rows,
-/// which is why the lookup index is deliberately not unique.
+/// History is kept: a revoked approval stays as a row (revoking either updates the
+/// row's Status or adds a new Revoked row -- the trust check handles both), and a
+/// later re-approval adds a new one. That is why the lookup index is deliberately
+/// not unique, and why the LATEST decision is the one that counts.
 /// </summary>
 public class NameReviewLogEntry
 {

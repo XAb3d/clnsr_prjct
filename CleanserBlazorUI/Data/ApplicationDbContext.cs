@@ -50,8 +50,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .OnDelete(DeleteBehavior.Cascade);
 
         // Every cleaning run looks up decisions by subscriber + file kind +
-        // customer. Deliberately NOT unique: history is kept (approve ->
-        // revoke -> approve again is three rows).
+        // customer. Deliberately NOT unique: history is kept (a revoked approval
+        // stays as a row, and a later re-approval adds a new one).
         builder.Entity<NameReviewLogEntry>()
             .HasIndex(e => new { e.SubscriberCode, e.FileKind, e.CustomerId })
             .HasDatabaseName("IX_NameReviewLog_Lookup");
