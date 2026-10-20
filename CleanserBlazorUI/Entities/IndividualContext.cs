@@ -66,6 +66,8 @@ public class IndividualContext
     public bool NameReviewTrusted { get; set; }
     /// <summary>A registrar rejected / revoked this name; overrides EVERY other trust path (reference, fuzzy match, approval).</summary>
     public bool NameReviewVetoed { get; set; }
+    /// <summary>Raw names + anchors captured right after the read; see NameReviewSnapshot.</summary>
+    public NameReviewSnapshot? NameReview { get; set; }
     public string UNL_NDIA_OldData { get; set; } = string.Empty;
     public string UNL_natidnum { get; set; } = string.Empty;
     public string UNL_votersidnum { get; set; } = string.Empty;
