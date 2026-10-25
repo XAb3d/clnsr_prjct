@@ -2966,7 +2966,7 @@
         // ── #15: Same CustomerID — different GHA (Ghana Card) numbers ──────────
         // GHA Card numbers are meant to uniquely identify one person nationally,
         // so if the same CustomerID has two different GHA-format ID values on
-        // file -- regardless of which of the 7 ID columns each is filed under --
+        // file -- regardless of which of the 9 ID columns each is filed under --
         // that's a genuine identity conflict, not just a formatting quirk.
         // Restricted to GHA specifically (not other 3-letter country prefixes
         // like NGA/CIV) since only the Ghana Card carries that uniqueness
@@ -2987,12 +2987,12 @@
         {
             var records = grp.ToList();
             // No minimum group size here -- a single row can conflict with
-            // itself if two of its own 7 ID columns both hold a different,
+            // itself if two of its own 9 ID columns both hold a different,
             // fully-formed (13-char) GHA Card value. That's just as much a
             // genuine identity conflict as the same thing spread across two
             // rows sharing a CustomerID.
 
-            // (fieldName, ghaValue, record) for every GHA-format ID across all 7 ID columns
+            // (fieldName, ghaValue, record) for every GHA-format ID across all 9 ID columns
             var ghaEntries = new List<(string Field, string Value, IndividualContext Rec)>();
             foreach (var r in records)
             {
@@ -3008,6 +3008,14 @@
                 CheckGhaField(r.SSNum?.Data, "SSNum");
                 CheckGhaField(r.EzwichNum?.Data, "EzwichNum");
                 CheckGhaField(r.OtherIDNum?.Data, "OtherIDNum");
+                // Ghana Card numbers are routinely filed under TINum too (the
+                // Ghana Card number doubles as the individual TIN), and a
+                // GHA-format value can land in OtherIDType by data-entry slip.
+                // OtherIDType is a type label so it normally holds no value
+                // that parses as a Ghana Card -- scanning it costs nothing and
+                // closes the mis-entry case.
+                CheckGhaField(r.OtherIDType?.Data, "OtherIDType");
+                CheckGhaField(r.TINum?.Data, "TINum");
             }
 
             var distinctGhaValues = ghaEntries.Select(e => e.Value).Distinct().ToList();
@@ -6654,8 +6662,10 @@
             // never got one.
             var cellProperties = new List<CellDataAndStatus?>
                 {
-                    individualRow.CreditFacilityAccNum,individualRow.CustomerID,individualRow.BranchCode,individualRow.NatIDNum,individualRow.Gender,
-                    individualRow.DateOfBirth,individualRow.Surname,individualRow.CurResAddr1,individualRow.PostAddrLine1,
+                    individualRow.CreditFacilityAccNum, individualRow.CustomerID, individualRow.BranchCode,
+                    individualRow.NatIDNum, individualRow.VotersIDNum, individualRow.DriverLicNum,
+                    individualRow.PassportNum, individualRow.SSNum, individualRow.Gender,
+                    individualRow.DateOfBirth, individualRow.Surname, individualRow.CurResAddr1, individualRow.PostAddrLine1,
                     individualRow.CreditFacilityType,individualRow.FacilityTerm,individualRow.AmountCurrency,
                     individualRow.FacilityAmount,individualRow.DisbursementDate,individualRow.DisbursementAmt,individualRow.MaturityDate,
                     individualRow.SchdInstalAmount,individualRow.RepaymentFreq,individualRow.CurBal,individualRow.CurBalIndicator,individualRow.AmountInArrears,
@@ -8017,18 +8027,19 @@
                 }
                 return true;
             }
-            const string sequentialIdMsg = "ID APPEARS TO BE A SEQUENTIAL PLACEHOLDER VALUE (e.g. 123456789) — PROVIDE A VALID ID";
-            var allIdFields = new (CellDataAndStatus? field, string label)[]
+            var primaryIdFields = new (CellDataAndStatus? field, string label)[]
             {
-                (ic.NatIDNum, "NATIDNUM"), (ic.VotersIDNum, "VOTERSIDNUM"), (ic.DriverLicNum, "DRIVERLICNUM"),
-                (ic.PassportNum, "PASSPORTNUM"), (ic.SSNum, "SSNUM"), (ic.EzwichNum, "EZWICHNUM"), (ic.OtherIDNum, "OTHERIDNUM"),
-                (ic.TINum, "TINUM")
+                (ic.NatIDNum, "NATIDNUM"), (ic.VotersIDNum, "VOTERSIDNUM"),
+                (ic.DriverLicNum, "DRIVERLICNUM"), (ic.PassportNum, "PASSPORTNUM"),
+                (ic.SSNum, "SSNUM")
             };
-            foreach (var (idField, idLabel) in allIdFields)
+            foreach (var (idField, idLabel) in primaryIdFields)
             {
                 if (IsSequentialPlaceholderDigits(idField?.Data))
                 {
-                    AddCellError(idField, sequentialIdMsg);
+                    AddCellError(
+                        idField,
+                        $"{idLabel}: ID APPEARS TO BE A SEQUENTIAL PLACEHOLDER VALUE (e.g. 123456789) — PROVIDE A VALID ID");
                 }
             }
 
@@ -8037,7 +8048,7 @@
             // always contains at least one digit. People often enter these
             // meaning "the real ID for this person is a staff/Ghana Card/
             // student ID", not literally the word itself. Flag as invalid
-            // ONLY when NONE of the 8 ID columns has a genuinely valid-
+            // ONLY when NONE of the primary ID columns has a genuinely valid-
             // looking (digit-containing) value -- if even one other column
             // does, that's a usable ID for this person and the label
             // elsewhere shouldn't fail the record (same "either ID is
@@ -8052,11 +8063,11 @@
                 var cleaned = new string(value.Where(c => !char.IsWhiteSpace(c)).ToArray());
                 return cleaned.Length > 0 && cleaned.All(char.IsLetter);
             }
-            bool anyIdFieldHasDigit = allIdFields.Any(f => !string.IsNullOrWhiteSpace(f.field?.Data) && f.field!.Data!.Any(char.IsDigit));
+            bool anyIdFieldHasDigit = primaryIdFields.Any(f => !string.IsNullOrWhiteSpace(f.field?.Data) && f.field!.Data!.Any(char.IsDigit));
             if (!anyIdFieldHasDigit)
             {
-                const string alphaOnlyIdMsg = "ID APPEARS TO BE A CATEGORY LABEL (e.g. STAFF, GHANACARD, STUDENT), NOT AN ACTUAL ID NUMBER — PROVIDE A VALID ID (NO OTHER COLUMN HAS A USABLE ID EITHER)";
-                foreach (var (idField, idLabel) in allIdFields)
+                const string alphaOnlyIdMsg = "ID APPEARS TO BE A CATEGORY LABEL (e.g. STAFF, GHANACARD, STUDENT), NOT AN ACTUAL ID NUMBER — PROVIDE A VALID ID (NO PRIMARY ID COLUMN HAS A USABLE ID EITHER)";
+                foreach (var (idField, idLabel) in primaryIdFields)
                 {
                     if (IsAlphaOnlyIDValue(idField?.Data))
                     {
@@ -8657,6 +8668,8 @@
                         case "SSNum": AddCellError(ic.SSNum, ghaMsg); break;
                         case "EzwichNum": AddCellError(ic.EzwichNum, ghaMsg); break;
                         case "OtherIDNum": AddCellError(ic.OtherIDNum, ghaMsg); break;
+                        case "OtherIDType": AddCellError(ic.OtherIDType, ghaMsg); break;
+                        case "TINum": AddCellError(ic.TINum, ghaMsg); break;
                     }
                 }
             }
@@ -8717,26 +8730,17 @@
             bool DisbursementAmt = ic.DisbursementAmt.Errors == null || ic.DisbursementAmt.Errors.Count == 0;
             bool MaturityDate = ic.MaturityDate.Errors == null || ic.MaturityDate.Errors.Count == 0;
             bool CurBal = ic.CurBal.Errors == null || ic.CurBal.Errors.Count == 0;
-            // ── Previously missing from IsPassed entirely ───────────────────────
-            // VotersIDNum/DriverLicNum/PassportNum/SSNum/EzwichNum/OtherIDNum/TINum
-            // could all have AddCellError called on them (GHA-format checks,
-            // the sequential-placeholder check above, cross-record conflict
-            // checks) and it had zero effect on whether the record passed --
-            // only NatIDNum's error status was ever consulted below. A
-            // sequential placeholder like "123456789" in VotersIDNum, for
-            // example, got visibly flagged but never actually failed the record.
+            // F-J are the primary ID columns. Errors on supplementary ID columns
+            // K-N are not independent reasons to reject an otherwise valid row.
             bool VotersID = ic.VotersIDNum.Errors == null || ic.VotersIDNum.Errors.Count == 0;
             bool DriverLic = ic.DriverLicNum.Errors == null || ic.DriverLicNum.Errors.Count == 0;
             bool PassportN = ic.PassportNum.Errors == null || ic.PassportNum.Errors.Count == 0;
             bool SSN = ic.SSNum.Errors == null || ic.SSNum.Errors.Count == 0;
-            bool EzwichN = ic.EzwichNum.Errors == null || ic.EzwichNum.Errors.Count == 0;
-            bool OtherIDN = ic.OtherIDNum.Errors == null || ic.OtherIDNum.Errors.Count == 0;
-            bool TINumOk = ic.TINum.Errors == null || ic.TINum.Errors.Count == 0;
 
 
 
             ic.IsPassed = CreditFacilityAccNum && CustomerID && ids[0].Passed && Nat_id && ic.FirstName.Passed && ic.Surname.Passed && DateOfBirth && FacilityAmount && DisbursementDate &&
-            DisbursementAmt && MaturityDate && CurBal && VotersID && DriverLic && PassportN && SSN && EzwichN && OtherIDN && TINumOk;
+            DisbursementAmt && MaturityDate && CurBal && VotersID && DriverLic && PassportN && SSN;
             return ic.IsPassed;
         }
         if (typeof(T) == typeof(BusinessContextDud))
