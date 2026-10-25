@@ -25,6 +25,15 @@ public class BusinessContext
     /// Written to the WARNING column.
     /// </summary>
     public string? ReferenceNameTrustNote { get; set; } = null;
+
+    // ── Name review decisions (see NameReviewLogEntry / Helpers/NameReviewTrust.cs) ──
+    // Resolved once per run, right after the file is read and before ISCleaned.
+    /// <summary>A registrar approved this name for this person; counts as trust for the name-keyword checks.</summary>
+    public bool NameReviewTrusted { get; set; }
+    /// <summary>A registrar rejected / revoked this name; overrides EVERY other trust path (reference, fuzzy match, approval).</summary>
+    public bool NameReviewVetoed { get; set; }
+    /// <summary>Raw names + anchors captured right after the read; see NameReviewSnapshot.</summary>
+    public NameReviewSnapshot? NameReview { get; set; }
     /// <summary>Set to "UNL" when the same AccNum+CustomerID appears with a
     /// different DisbursementDate elsewhere in the same submission -- exempted
     /// for overdraft facilities (CreditFacilityType == "V"), which legitimately

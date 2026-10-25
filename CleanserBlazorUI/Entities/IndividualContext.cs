@@ -59,6 +59,15 @@ public class IndividualContext
     /// Set when the name was accepted based on reference trust. Written to WARNING column.
     /// </summary>
     public string? ReferenceNameTrustNote { get; set; } = null;
+
+    // ── Name review decisions (see NameReviewLogEntry / Helpers/NameReviewTrust.cs) ──
+    // Resolved once per run, right after the file is read and before ISCleaned.
+    /// <summary>A registrar approved this name for this person; counts as trust for the name-keyword checks.</summary>
+    public bool NameReviewTrusted { get; set; }
+    /// <summary>A registrar rejected / revoked this name; overrides EVERY other trust path (reference, fuzzy match, approval).</summary>
+    public bool NameReviewVetoed { get; set; }
+    /// <summary>Raw names + anchors captured right after the read; see NameReviewSnapshot.</summary>
+    public NameReviewSnapshot? NameReview { get; set; }
     public string UNL_NDIA_OldData { get; set; } = string.Empty;
     public string UNL_natidnum { get; set; } = string.Empty;
     public string UNL_votersidnum { get; set; } = string.Empty;

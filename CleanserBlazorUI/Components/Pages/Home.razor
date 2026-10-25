@@ -13,6 +13,7 @@
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<Home> Logger
+@inject IDialogService DialogService
 
 
 @attribute [Authorize]
@@ -3799,6 +3800,10 @@
                         AlertSeverity = MudBlazor.Severity.Success;
                         AlertSeverityVisible = "d-block";
 
+                        // ── Name review: apply reviewer corrections, then resolve trust / veto ──
+                        var nameReviewIndexInd = await LoadNameReviewIndexAsync(NameReviewFileKind.Individual, filename);
+                        ApplyNameReviewCorrectionsInd(ExcelDataRecieved, nameReviewIndexInd);
+                        ApplyNameReviewTrustInd(ExcelDataRecieved, nameReviewIndexInd);
                         var RefData = await DataManagementService.GETReferenceData_IND(filename);
                         isSubscriber_X_or_Y = await DataManagementService.GetSubscribeX_or_Y(filename);
                         var (mainMatcherTransformer, _duplicatesInd, _correctDateOfBirth, _dobIssues, _matchdata, _newdata, _duplicateCount) = REF_MainMatcherTransformerInd_Clean_IND(RefData, ExcelDataRecieved);
@@ -3842,6 +3847,28 @@
                         // subset is whatever in mainMatcherTransformer fails
                         // ISCleaned; that's what the UNL sheet itself actually shows.
                         _lastUnlBatchInd = mainMatcherTransformer.Where(r => !ISCleaned(r)).ToList();
+
+                        // ── Name review pause ──────────────────────────────────────────
+                        // If any records are unloadable ONLY because of reviewable name flags, let the user
+                        // decide on them now. If any decisions were saved, re-run this file so they apply:
+                        // corrections and trust are applied right after the read, so the whole pipeline (dedup,
+                        // cross-record checks, ISCleaned) then sees the reviewed names. Nothing has been written
+                        // yet at this point, so the abandoned first pass leaves no output behind.
+                        if (!_skipNameReviewOnce)
+                        {
+                            var nameReviewQueue = BuildNameReviewQueueInd(_lastUnlBatchInd);
+                            if (nameReviewQueue.Count > 0 && await ReviewNamesAsync(NameReviewFileKind.Individual, nameReviewQueue, filename) > 0)
+                            {
+                                var firstPassTempFile = FullExcelDataFilePath;
+                                destinationStream.Dispose();
+                                filestream.Dispose();
+                                try { File.Delete(firstPassTempFile!); } catch { /* non-fatal, swept later */ }
+                                readCounting = 0;
+                                _skipNameReviewOnce = true;
+                                try { return await GetSpreadsheetDataNew(browserFile, id); }
+                                finally { _skipNameReviewOnce = false; }
+                            }
+                        }
 
                         // DOBISSUES count: computed here rather than taken from the
                         // matcher's return value, since that older count only
@@ -3988,6 +4015,10 @@
                         AlertSeverity = MudBlazor.Severity.Success;
                         AlertSeverityVisible = "d-block";
 
+                        // ── Name review: apply reviewer corrections, then resolve trust / veto ──
+                        var nameReviewIndexBus = await LoadNameReviewIndexAsync(NameReviewFileKind.Business, filename);
+                        ApplyNameReviewCorrectionsBus(ExcelDataRecieved, nameReviewIndexBus);
+                        ApplyNameReviewTrustBus(ExcelDataRecieved, nameReviewIndexBus);
                         var RefData = await DataManagementService.GETReferenceData_BUS(filename);
                         var (mainMatcherTransformer, _duplicatesInd, _correctDateOfBirth, _dobIssues, _matchdata, _newdata, _duplicateCount) = REF_MainMatcherTransformerInd_Clean_BUS(RefData, ExcelDataRecieved);
                         // Fold reference in as virtual records so Businessname/Busregnum/Tinum
@@ -4011,6 +4042,28 @@
                         // report" bug fixed the same way: sourced from whatever in
                         // mainMatcherTransformer fails ISCleaned, not from _duplicatesInd.
                         _lastUnlBatchBus = mainMatcherTransformer.Where(r => !ISCleaned(r)).ToList();
+
+                        // ── Name review pause ──────────────────────────────────────────
+                        // If any records are unloadable ONLY because of reviewable name flags, let the user
+                        // decide on them now. If any decisions were saved, re-run this file so they apply:
+                        // corrections and trust are applied right after the read, so the whole pipeline (dedup,
+                        // cross-record checks, ISCleaned) then sees the reviewed names. Nothing has been written
+                        // yet at this point, so the abandoned first pass leaves no output behind.
+                        if (!_skipNameReviewOnce)
+                        {
+                            var nameReviewQueue = BuildNameReviewQueueBus(_lastUnlBatchBus);
+                            if (nameReviewQueue.Count > 0 && await ReviewNamesAsync(NameReviewFileKind.Business, nameReviewQueue, filename) > 0)
+                            {
+                                var firstPassTempFile = FullExcelDataFilePath;
+                                destinationStream.Dispose();
+                                filestream.Dispose();
+                                try { File.Delete(firstPassTempFile!); } catch { /* non-fatal, swept later */ }
+                                readCounting = 0;
+                                _skipNameReviewOnce = true;
+                                try { return await GetSpreadsheetDataNew(browserFile, id); }
+                                finally { _skipNameReviewOnce = false; }
+                            }
+                        }
                         _lastDuplicateCountBus = _duplicatesInd?.Count ?? 0;
                         _lastTotalRecordsBus = mainMatcherTransformer.Count + _lastDuplicateCountBus;
                         _lastUnlFilename = filename;
@@ -4290,6 +4343,226 @@
         }
         return new CleaningStatus();
     }
+    // ── Name review (see NameReviewLogEntry and Helpers/NameReviewTrust.cs) ─────────
+    // A registrar's decisions on flagged names are applied in two steps, right after the
+    // file is read and before anything else looks at the names:
+    //   1. corrections -- raw text a reviewer fixed is replaced with the corrected text, so it
+    //      goes through every normal check as if the subscriber had sent it correctly;
+    //   2. trust -- each record is marked Trusted (approved), Vetoed (rejected / revoked) or
+    //      neither, for ISCleaned to act on.
+    // Raw text is matched via CellDataAndStatus.OldData (the cell as submitted). The name key,
+    // DOB and ID anchors come from the record as it stands after the read -- the Name Review
+    // screen must capture them at the same point, with the same NameReviewText helpers.
+    async Task<NameReviewIndex> LoadNameReviewIndexAsync(string fileKind, string fileName)
+    {
+        try
+        {
+            var subscriberCode = await DataManagementService.GetFileShortCodeFromFileName(fileName);
+            var rows = await DataManagementService.GetNameReviewLogAsync(subscriberCode, fileKind);
+            return new NameReviewIndex(fileKind, rows, NormalizeCustomerId);
+        }
+        catch (Exception)
+        {
+            // Never let the review feature stop a cleaning run -- but say so: without the
+            // decisions, approved names will flag again and rejected ones won't be vetoed.
+            Snackbar.Add("Name review decisions could not be loaded; this run did not apply them.", MudBlazor.Severity.Warning);
+            return new NameReviewIndex(fileKind, Array.Empty<NameReviewLogEntry>(), NormalizeCustomerId);
+        }
+    }
+
+    static CellDataAndStatus KeepOldData(CellDataAndStatus corrected, CellDataAndStatus? original)
+    {
+        corrected.OldData = original?.OldData ?? corrected.OldData;   // the UNL sheet still shows what was submitted
+        return corrected;
+    }
+
+    static IEnumerable<string?> IndividualAnchorIdValues(IndividualContext ic) => new string?[]
+    {
+        ic.NatIDNum?.Data, ic.VotersIDNum?.Data, ic.DriverLicNum?.Data, ic.PassportNum?.Data, ic.SSNum?.Data,
+        ic.EzwichNum?.Data, ic.OtherIDType?.Data, ic.OtherIDNum?.Data, ic.TINum?.Data,
+    };
+
+    void ApplyNameReviewCorrectionsInd(List<IndividualContext> records, NameReviewIndex index)
+    {
+        var transformer = new IndividualDataTransformer();
+        foreach (var ic in records)
+        {
+            var fix = index.FindCorrection(ic.CustomerID?.Data, ic.Surname?.OldData, ic.FirstName?.OldData, ic.MiddleNames?.OldData);
+            if (fix == null) continue;
+            ic.Surname = KeepOldData(transformer.Surname(fix.CorrectedSurname), ic.Surname);
+            ic.FirstName = KeepOldData(transformer.FirstName(fix.CorrectedFirstName), ic.FirstName);
+            ic.MiddleNames = KeepOldData(transformer.MiddleNames(fix.CorrectedMiddleNames), ic.MiddleNames);
+        }
+    }
+
+    void ApplyNameReviewCorrectionsBus(List<BusinessContext> records, NameReviewIndex index)
+    {
+        var transformer = new BusinessDataTransformer();
+        foreach (var bc in records)
+        {
+            var fix = index.FindCorrection(bc.CustomerID?.Data, bc.Businessname?.OldData);
+            if (fix == null) continue;
+            // Re-run the normal transformer on the corrected text so its own checks (including the
+            // invalid-character one) judge the corrected name, not the submitted one.
+            bc.Businessname = KeepOldData(transformer.Businessname(fix.CorrectedBusinessName), bc.Businessname);
+        }
+    }
+
+    void ApplyNameReviewTrustInd(List<IndividualContext> records, NameReviewIndex index)
+    {
+        foreach (var ic in records)
+        {
+            var dob = NameReviewText.NormalizeDob(ic.DateOfBirth?.Data);
+            var ids = NameReviewText.BuildAnchorIds(IndividualAnchorIdValues(ic));
+            var result = index.Evaluate(
+                ic.CustomerID?.Data,
+                NameReviewText.NameKey(ic.Surname?.Data, ic.FirstName?.Data, ic.MiddleNames?.Data),
+                dob, ids);
+            ic.NameReviewTrusted = result.Decision == NameTrustDecision.Trusted;
+            ic.NameReviewVetoed = result.Decision == NameTrustDecision.Vetoed;
+            if (ic.NameReviewTrusted && string.IsNullOrWhiteSpace(ic.ReferenceNameTrustNote))
+                ic.ReferenceNameTrustNote = "NAME REVIEW — " + result.Reason;
+
+            // Snapshot for the Name Review screen -- taken HERE because this is the only point where the
+            // raw text (OldData) and anchors are right; ISCleaned replaces the name cells later.
+            ic.NameReview = new NameReviewSnapshot
+            {
+                CustomerKey = NormalizeCustomerId(ic.CustomerID?.Data),
+                RawSurname = ic.Surname?.OldData ?? string.Empty,
+                RawFirstName = ic.FirstName?.OldData ?? string.Empty,
+                RawMiddleNames = ic.MiddleNames?.OldData ?? string.Empty,
+                Dob = dob,
+                AnchorIds = ids,
+            };
+        }
+    }
+
+    void ApplyNameReviewTrustBus(List<BusinessContext> records, NameReviewIndex index)
+    {
+        foreach (var bc in records)
+        {
+            var ids = NameReviewText.BuildAnchorIds(new string?[] { bc.Busregnum?.Data, bc.Tinum?.Data });
+            var result = index.Evaluate(
+                bc.CustomerID?.Data,
+                NameReviewText.NameKey(bc.Businessname?.Data),
+                string.Empty, ids);
+            bc.NameReviewTrusted = result.Decision == NameTrustDecision.Trusted;
+            bc.NameReviewVetoed = result.Decision == NameTrustDecision.Vetoed;
+            if (bc.NameReviewTrusted && string.IsNullOrWhiteSpace(bc.ReferenceNameTrustNote))
+                bc.ReferenceNameTrustNote = "NAME REVIEW — " + result.Reason;
+
+            bc.NameReview = new NameReviewSnapshot
+            {
+                CustomerKey = NormalizeCustomerId(bc.CustomerID?.Data),
+                RawBusinessName = bc.Businessname?.OldData ?? string.Empty,
+                AnchorIds = ids,
+            };
+        }
+    }
+
+    // ── Name review queue (what the Name Review screen lists) ───────────────────────
+    // Built from the run's UNL batch AFTER ISCleaned: a record qualifies only when every reason it is
+    // unloadable is a reviewable name flag (see NameReviewClassifier). Records a reviewer already rejected
+    // or revoked are skipped so they don't come back every run.
+    static List<CellState> CollectCellStates(object record)
+        => record.GetType().GetProperties()
+            .Where(p => p.PropertyType == typeof(CellDataAndStatus) && p.GetIndexParameters().Length == 0)
+            .Select(p => (Name: p.Name, Cell: p.GetValue(record) as CellDataAndStatus))
+            .Where(x => x.Cell != null)
+            .Select(x => new CellState(x.Name, x.Cell!.Passed, (IReadOnlyList<string>?)x.Cell.Errors ?? Array.Empty<string>()))
+            .ToList();
+
+    NameProbe BuildNameProbeInd(IndividualContext ic)
+    {
+        // The probe re-tests the name with the cleaner's own helpers because some messages are ambiguous
+        // ("...ARE MANDATORY..." is raised both for a restricted word and for a blank surname).
+        var parts = new[] { ic.Surname?.Data ?? string.Empty, ic.FirstName?.Data ?? string.Empty, ic.MiddleNames?.Data ?? string.Empty };
+        var raw = ic.NameReview == null ? parts : new[] { ic.NameReview.RawSurname, ic.NameReview.RawFirstName, ic.NameReview.RawMiddleNames };
+        var upper = string.Join(" ", parts).Trim().ToUpperInvariant();
+        return new NameProbe(
+            SpecialCharacter: raw.Any(p => InvalidCharacterTest(NameReviewFileKind.Individual)(p)),
+            RestrictedWord: parts.Any(ContainsRestrictedWord),
+            MultipleIndividuals: upper.Contains(" AND ") || upper.EndsWith(" AND"));
+    }
+
+    NameProbe BuildNameProbeBus(BusinessContext bc)
+    {
+        var raw = bc.NameReview?.RawBusinessName ?? bc.Businessname?.OldData ?? string.Empty;
+        return new NameProbe(SpecialCharacter: InvalidCharacterTest(NameReviewFileKind.Business)(raw));
+    }
+
+    /// <summary>The cleaner's own invalid-character test for a name part, per file kind (used for validation and the probe).</summary>
+    Func<string, bool> InvalidCharacterTest(string fileKind)
+        => string.Equals(fileKind, NameReviewFileKind.Business, StringComparison.OrdinalIgnoreCase)
+            ? s => stringHelper.ContainsInvalidCharactersBusiness(stringHelper.RemoveSystemErroNames(s).Replace(".", " ").Replace(",", " "))
+            : s => stringHelper.ContainsInvalidCharacters(stringHelper.NormalizeApostrophes(s)) || s.Contains(',');
+
+    List<NameReviewItem> BuildNameReviewQueueInd(IEnumerable<IndividualContext> unlBatch)
+    {
+        var rows = new List<(NameReviewSnapshot, NameReviewVerdict)>();
+        foreach (var ic in unlBatch)
+        {
+            if (ic.NameReview == null || ic.NameReviewVetoed) continue;
+            rows.Add((ic.NameReview, NameReviewClassifier.Classify(NameReviewFileKind.Individual, CollectCellStates(ic), BuildNameProbeInd(ic))));
+        }
+        return NameReviewQueue.Group(NameReviewFileKind.Individual, rows);
+    }
+
+    List<NameReviewItem> BuildNameReviewQueueBus(IEnumerable<BusinessContext> unlBatch)
+    {
+        var rows = new List<(NameReviewSnapshot, NameReviewVerdict)>();
+        foreach (var bc in unlBatch)
+        {
+            if (bc.NameReview == null || bc.NameReviewVetoed) continue;
+            rows.Add((bc.NameReview, NameReviewClassifier.Classify(NameReviewFileKind.Business, CollectCellStates(bc), BuildNameProbeBus(bc))));
+        }
+        return NameReviewQueue.Group(NameReviewFileKind.Business, rows);
+    }
+
+    bool _skipNameReviewOnce;
+
+    /// <summary>
+    /// Shows the Name Review dialog and saves whatever the user decided. Returns how many decisions were saved.
+    /// The screen is open to every user; each saved row records who decided (DecidedBy).
+    /// </summary>
+    async Task<int> ReviewNamesAsync(string fileKind, List<NameReviewItem> queue, string fileName)
+    {
+        try
+        {
+            var subscriberCode = await DataManagementService.GetFileShortCodeFromFileName(fileName);
+            var reviewer = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User.Identity?.Name ?? string.Empty;
+            var parameters = new DialogParameters<NameReviewDialog>
+            {
+                { d => d.Items, queue },
+                { d => d.InvalidCharacters, InvalidCharacterTest(fileKind) },
+            };
+            var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false };
+            var dialog = await DialogService.ShowAsync<NameReviewDialog>("Names awaiting review", parameters, options);
+            var result = await dialog.Result;
+            if (result == null || result.Canceled || result.Data is not List<(NameReviewItem Item, NameReviewDecision Decision)> decisions) return 0;
+
+            var saved = 0;
+            foreach (var (item, decision) in decisions)
+            {
+                var (entry, error) = NameReviewCapture.Build(item, subscriberCode, decision, reviewer, DateTime.UtcNow, InvalidCharacterTest(fileKind));
+                if (entry == null)
+                {
+                    Snackbar.Add($"{item.DisplayName}: {error}", MudBlazor.Severity.Warning);
+                    continue;
+                }
+                await DataManagementService.SaveNameReviewDecisionAsync(entry);
+                saved++;
+            }
+            if (saved > 0) Snackbar.Add($"{saved} name decision(s) saved - re-running this file with them applied.", MudBlazor.Severity.Success);
+            return saved;
+        }
+        catch (Exception)
+        {
+            Snackbar.Add("The name review could not be completed; continuing without it.", MudBlazor.Severity.Warning);
+            return 0;
+        }
+    }
+
     async Task RunCleanser(int id)
     {
         correctDateOfBirth = dobIssues = matchdata = newdata = duplicateCount = "0";
@@ -7089,6 +7362,19 @@
             // recognized as valid.
             bool businessNameValidatedByFuzzyMatch = !string.IsNullOrWhiteSpace(bc.BusinessNameFuzzyMatchNote);
 
+            // Name review decisions (resolved before ISCleaned): a rejection / revocation is a hard
+            // veto over every trust path (reference, fuzzy match, approval); an approval counts
+            // like reference trust.
+            if (bc.NameReviewVetoed)
+            {
+                businessNameValidatedByReference = false;
+                businessNameValidatedByFuzzyMatch = false;
+            }
+            else if (bc.NameReviewTrusted)
+            {
+                businessNameValidatedByReference = true;
+            }
+
             if (string.IsNullOrWhiteSpace(bName) && !businessNameValidatedByReference && !businessNameValidatedByFuzzyMatch)
             {
                 bc.Businessname.Passed = false;
@@ -7895,6 +8181,13 @@
                 }
             }
 
+            // Name review decisions (resolved before ISCleaned). A reviewer's rejection / revocation
+            // overrides every trust path, including a name the reference would otherwise vouch for;
+            // an approval counts as trust. Special characters are never "trusted" -- those are
+            // corrected upstream and then judged like any other name.
+            if (ic.NameReviewVetoed) nameValidatedByReference = false;
+            else if (ic.NameReviewTrusted) nameValidatedByReference = true;
+
             if (!nameValidatedByReference && (ContainsRestrictedWord(ic.Surname.Data) || ContainsRestrictedWord(ic.FirstName.Data) || ContainsRestrictedWord(ic.MiddleNames.Data)))
             {
                 ic.Surname.Passed = false; ic.FirstName.Passed = false;
@@ -7919,23 +8212,26 @@
                     AddCellError(ic.Surname,
                         "INVALID NAME: BUSINESS KEYWORDS DETECTED IN INDIVIDUAL RECORD — USE COMMERCIAL FILE TYPE");
                 }
-
-                // ── Sprint 8: AND in IND name = multiple persons — unloadable ─
-                if (upperName.Contains(" AND ") || upperName.EndsWith(" AND"))
-                {
-                    ic.Surname.Passed = false;
-                    ic.FirstName.Passed = false;
-                    AddCellError(ic.Surname,
-                        "INVALID NAME: MULTIPLE INDIVIDUALS DETECTED — A FACILITY RECORD MUST BE ASSIGNED TO A SINGLE PERSON");
-                }
             }
             else
             {
-                // Name passed by reference — add a note in the WARNING column
+                // Name passed by reference or review — add a note in the WARNING column
                 // so associates know this record was trusted from last month's clean
                 if (string.IsNullOrWhiteSpace(ic.ReferenceNameTrustNote))
                     ic.ReferenceNameTrustNote = "REFERENCE MATCH — NAME ACCEPTED FROM PREVIOUS CLEAN";
             }
+
+            // AND in an individual's name means more than one person on one facility. That is a
+            // correct detection, not a judgement call, so NO trust path bypasses it -- the data has
+            // to be split into one record per person.
+            if (upperName.Contains(" AND ") || upperName.EndsWith(" AND"))
+            {
+                ic.Surname.Passed = false;
+                ic.FirstName.Passed = false;
+                AddCellError(ic.Surname,
+                    "INVALID NAME: MULTIPLE INDIVIDUALS DETECTED — A FACILITY RECORD MUST BE ASSIGNED TO A SINGLE PERSON");
+            }
+
 
             var proofOfAddType_proofOfAddNum = stringHelper.ProofOfAddType_ProofOfAddNum(ic.ProofOfAddType.Data, ic.ProofOfAddNum.Data);
             ic.ProofOfAddType = proofOfAddType_proofOfAddNum[0];

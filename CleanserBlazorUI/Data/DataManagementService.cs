@@ -466,6 +466,40 @@ public class DataManagementService
         return scc;
     }
     //Return only Shortname of a file
+    /// <summary>
+    /// Reviewer decisions for one subscriber and file kind (IND / BUS), read once per cleaning run
+    /// and indexed in memory -- see NameReviewIndex. The table is small (decisions, not records).
+    /// </summary>
+    public async Task<List<NameReviewLogEntry>> GetNameReviewLogAsync(string subscriberCode, string fileKind)
+    {
+        return await _context.NameReviewLog
+            .AsNoTracking()
+            .Where(e => e.SubscriberCode == subscriberCode && e.FileKind == fileKind)
+            .ToListAsync();
+    }
+
+    /// <summary>Appends a reviewer decision. History is kept: rows are never edited to change a decision.</summary>
+    public async Task<NameReviewLogEntry> SaveNameReviewDecisionAsync(NameReviewLogEntry entry)
+    {
+        _context.NameReviewLog.Add(entry);
+        await _context.SaveChangesAsync();
+        return entry;
+    }
+
+    /// <summary>
+    /// Revokes an APPROVAL (the trust check then treats the name as vetoed). Only an Approved row can be
+    /// revoked; returns false otherwise. The row stays, marked Revoked with who and when.
+    /// </summary>
+    public async Task<bool> RevokeNameReviewDecisionAsync(int id, string revokedBy)
+    {
+        var row = await _context.NameReviewLog.FirstOrDefaultAsync(e => e.Id == id);
+        if (row == null || row.Status != NameReviewStatus.Approved) return false;
+        row.Status = NameReviewStatus.Revoked;
+        row.RevokedBy = revokedBy;
+        row.RevokedAtUtc = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return true;
+    }
     public async Task<string> GetFileShortCodeFromFileName(string fileShortName)
     {
         var _filename = fileShortName.Split('_')[0];
