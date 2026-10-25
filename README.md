@@ -185,6 +185,8 @@ For awareness, here's what's accumulated in `Migrations/` so far, oldest to newe
 | Aug 9, 2026 | `MoveSubscriberShortCodesIntoAppDb` | Moved `SubscriberShortCodes` off the old legacy DB and into this app's own `DefaultConnection` |
 | Aug 10, 2026 | `AddLastConfirmedReportingPeriod` | Reporting-period tracking |
 | Aug 31, 2026 | `ExpandSubscriberShortCodes` | Expanded `SubscriberShortCodes` with the legacy `Subscriber` schema's remaining columns (contacts, addresses, sector code, etc.) |
+| Oct 12, 2026 | `AddNameReviewLog` | Empty migration (no schema change) -- generated before the model change was picked up; kept so migration history stays consistent |
+| Oct 13, 2026 | `CreateNameReviewLogTable` | `NameReviewLog` table: registrar decisions (approve / reject / revoke) on names flagged unloadable, with corrections and identity anchors |
 
 You don't need to run these individually or in a particular order beyond what step 4 already does automatically -- this table is just so you know what's in the DB after setup, and why.
 
