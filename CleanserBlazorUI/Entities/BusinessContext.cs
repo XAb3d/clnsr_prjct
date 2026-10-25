@@ -32,6 +32,8 @@ public class BusinessContext
     public bool NameReviewTrusted { get; set; }
     /// <summary>A registrar rejected / revoked this name; overrides EVERY other trust path (reference, fuzzy match, approval).</summary>
     public bool NameReviewVetoed { get; set; }
+    /// <summary>Raw names + anchors captured right after the read; see NameReviewSnapshot.</summary>
+    public NameReviewSnapshot? NameReview { get; set; }
     /// <summary>Set to "UNL" when the same AccNum+CustomerID appears with a
     /// different DisbursementDate elsewhere in the same submission -- exempted
     /// for overdraft facilities (CreditFacilityType == "V"), which legitimately

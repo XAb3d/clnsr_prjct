@@ -170,7 +170,9 @@ public class DataManagementService
         for (int i = 0; i < toInsert.Count; i += batchSize)
             await BulkInsertBatchIND(toInsert.Skip(i).Take(batchSize).ToList());
         if (toUpdate.Count > 0)
-            await _context.BulkUpdateAsync(toUpdate, new BulkConfig { BatchSize = 4000 });
+            await _context.BulkUpdateAsync(
+                toUpdate.DistinctBy(r => r.Id).ToList(),
+                new BulkConfig { BatchSize = 4000 });
 
         return changelog;
     }
@@ -297,7 +299,9 @@ public class DataManagementService
         for (int i = 0; i < toInsert.Count; i += batchSize)
             await BulkInsertBatchBUS(toInsert.Skip(i).Take(batchSize).ToList());
         if (toUpdate.Count > 0)
-            await _context.BulkUpdateAsync(toUpdate, new BulkConfig { BatchSize = 4000 });
+            await _context.BulkUpdateAsync(
+                toUpdate.DistinctBy(r => r.Id).ToList(),
+                new BulkConfig { BatchSize = 4000 });
     }
 
 
@@ -472,6 +476,29 @@ public class DataManagementService
             .AsNoTracking()
             .Where(e => e.SubscriberCode == subscriberCode && e.FileKind == fileKind)
             .ToListAsync();
+    }
+
+    /// <summary>Appends a reviewer decision. History is kept: rows are never edited to change a decision.</summary>
+    public async Task<NameReviewLogEntry> SaveNameReviewDecisionAsync(NameReviewLogEntry entry)
+    {
+        _context.NameReviewLog.Add(entry);
+        await _context.SaveChangesAsync();
+        return entry;
+    }
+
+    /// <summary>
+    /// Revokes an APPROVAL (the trust check then treats the name as vetoed). Only an Approved row can be
+    /// revoked; returns false otherwise. The row stays, marked Revoked with who and when.
+    /// </summary>
+    public async Task<bool> RevokeNameReviewDecisionAsync(int id, string revokedBy)
+    {
+        var row = await _context.NameReviewLog.FirstOrDefaultAsync(e => e.Id == id);
+        if (row == null || row.Status != NameReviewStatus.Approved) return false;
+        row.Status = NameReviewStatus.Revoked;
+        row.RevokedBy = revokedBy;
+        row.RevokedAtUtc = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return true;
     }
     public async Task<string> GetFileShortCodeFromFileName(string fileShortName)
     {

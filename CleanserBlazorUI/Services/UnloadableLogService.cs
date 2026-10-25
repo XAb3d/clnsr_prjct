@@ -38,6 +38,8 @@ namespace CleanserBlazorUI.Services
 
             // ── Demographic: Customer Name ──────────────────────────────────
             ("SURNAME AND FIRSTNAME ARE MANDATORY", new[] { ("Demographic", "Customer Name") }),
+            ("BUSINESSNAME: INVALID CHARACTERS", new[] { ("Demographic", "Customer Name") }),
+            ("TRADINGNAME: INVALID CHARACTERS", new[] { ("Demographic", "Customer Name") }),
             ("NAMES CANNOT CONTAIN SEPECIAL CHARACTER", new[] { ("Demographic", "Customer Name") }),
             ("NAMES CANNOT CONTAIN SPECIAL CHARACTER", new[] { ("Demographic", "Customer Name") }),
             ("Invalid Business Name", new[] { ("Demographic", "Customer Name") }),
@@ -51,6 +53,7 @@ namespace CleanserBlazorUI.Services
             // ── Demographic: Date of Birth ──────────────────────────────────
             ("DIFFERENT DATES OF BIRTH", new[] { ("Demographic", "Date of Birth") }),
             ("DATE OF BIRTH DOES NOT MATCH PREVIOUS SUBMISSION", new[] { ("Demographic", "Date of Birth") }),
+            ("DATEOFBIRTH: INVALID DATE", new[] { ("Demographic", "Date of Birth") }),
             ("DUPLICATE WITH DIFFERENT DATE OF BIRTH", new[] { ("Demographic", "Date of Birth") }),
             ("DUPLICATE WITH SAME OR DIFFERENT DATE OF BIRTH", new[] { ("Demographic", "Date of Birth") }),
 
@@ -80,11 +83,13 @@ namespace CleanserBlazorUI.Services
             ("FACILITY ACCOUNT NUMBER CANNOT BE THE SAME AS CUSTOMERID", new[] { ("Financial", "Facility Account Number") }),
             ("INVALID ACCOUNT NUMBER - EXPONENTIATED", new[] { ("Financial", "Facility Account Number") }),
             ("MISSING FACILITY ACCOUNT NUMBER", new[] { ("Financial", "Facility Account Number") }),
+            ("ACCNUM: NOT VALID", new[] { ("Financial", "Facility Account Number") }),
 
             // ── Financial: Customer ID/Number ───────────────────────────────
             ("CUSTOMERID: CONTAIN INVALID CHARACTERS", new[] { ("Financial", "Customer ID/Number") }),
             ("CUSTOMERID CANNOT BE THE SAME AS FACILITY ACCOUNT NUMBER", new[] { ("Financial", "Customer ID/Number") }),
             ("INVALID CUSTOMER ID - EXPONENTIATED", new[] { ("Financial", "Customer ID/Number") }),
+            ("CUSTOMERID: NOT VALID", new[] { ("Financial", "Customer ID/Number") }),
 
             // ── Financial: Loan/Disbursement Amount ─────────────────────────
             ("FACILITYAMOUNT, DISBURSEMENTAMT CANNOT BE EMPTY OR ZERO", new[] { ("Financial", "Loan/Disbursement Amount") }),
@@ -107,7 +112,9 @@ namespace CleanserBlazorUI.Services
             ("DUPLICATE WITH DIFFERENT DISBURSEMENT DATE", new[] { ("FacilitySubmission", "Disbursement Date") }),
             ("DOES NOT MATCH THE PREVIOUS SUBMISSION", new[] { ("FacilitySubmission", "Disbursement Date") }),
             ("DISBURSEMENT DATE YEAR", new[] { ("FacilitySubmission", "Disbursement Date") }),
+            ("DISBURSEMENTDATE: INVALID DATE", new[] { ("FacilitySubmission", "Disbursement Date") }),
             ("MATURITY DATE YEAR", new[] { ("FacilitySubmission", "Maturity Date") }),
+            ("MATURITYDATE: INVALID DATE", new[] { ("FacilitySubmission", "Maturity Date") }),
         };
 
         private static readonly (string Category, string SubCategory)[] UncategorizedTarget =

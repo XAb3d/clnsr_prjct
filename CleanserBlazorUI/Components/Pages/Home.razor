@@ -13,6 +13,7 @@
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<Home> Logger
+@inject IDialogService DialogService
 
 
 @attribute [Authorize]
@@ -2965,7 +2966,7 @@
         // ── #15: Same CustomerID — different GHA (Ghana Card) numbers ──────────
         // GHA Card numbers are meant to uniquely identify one person nationally,
         // so if the same CustomerID has two different GHA-format ID values on
-        // file -- regardless of which of the 7 ID columns each is filed under --
+        // file -- regardless of which of the 9 ID columns each is filed under --
         // that's a genuine identity conflict, not just a formatting quirk.
         // Restricted to GHA specifically (not other 3-letter country prefixes
         // like NGA/CIV) since only the Ghana Card carries that uniqueness
@@ -2986,12 +2987,12 @@
         {
             var records = grp.ToList();
             // No minimum group size here -- a single row can conflict with
-            // itself if two of its own 7 ID columns both hold a different,
+            // itself if two of its own 9 ID columns both hold a different,
             // fully-formed (13-char) GHA Card value. That's just as much a
             // genuine identity conflict as the same thing spread across two
             // rows sharing a CustomerID.
 
-            // (fieldName, ghaValue, record) for every GHA-format ID across all 7 ID columns
+            // (fieldName, ghaValue, record) for every GHA-format ID across all 9 ID columns
             var ghaEntries = new List<(string Field, string Value, IndividualContext Rec)>();
             foreach (var r in records)
             {
@@ -3007,6 +3008,14 @@
                 CheckGhaField(r.SSNum?.Data, "SSNum");
                 CheckGhaField(r.EzwichNum?.Data, "EzwichNum");
                 CheckGhaField(r.OtherIDNum?.Data, "OtherIDNum");
+                // Ghana Card numbers are routinely filed under TINum too (the
+                // Ghana Card number doubles as the individual TIN), and a
+                // GHA-format value can land in OtherIDType by data-entry slip.
+                // OtherIDType is a type label so it normally holds no value
+                // that parses as a Ghana Card -- scanning it costs nothing and
+                // closes the mis-entry case.
+                CheckGhaField(r.OtherIDType?.Data, "OtherIDType");
+                CheckGhaField(r.TINum?.Data, "TINum");
             }
 
             var distinctGhaValues = ghaEntries.Select(e => e.Value).Distinct().ToList();
@@ -3839,6 +3848,28 @@
                         // ISCleaned; that's what the UNL sheet itself actually shows.
                         _lastUnlBatchInd = mainMatcherTransformer.Where(r => !ISCleaned(r)).ToList();
 
+                        // ── Name review pause ──────────────────────────────────────────
+                        // If any records are unloadable ONLY because of reviewable name flags, let the user
+                        // decide on them now. If any decisions were saved, re-run this file so they apply:
+                        // corrections and trust are applied right after the read, so the whole pipeline (dedup,
+                        // cross-record checks, ISCleaned) then sees the reviewed names. Nothing has been written
+                        // yet at this point, so the abandoned first pass leaves no output behind.
+                        if (!_skipNameReviewOnce)
+                        {
+                            var nameReviewQueue = BuildNameReviewQueueInd(_lastUnlBatchInd);
+                            if (nameReviewQueue.Count > 0 && await ReviewNamesAsync(NameReviewFileKind.Individual, nameReviewQueue, filename) > 0)
+                            {
+                                var firstPassTempFile = FullExcelDataFilePath;
+                                destinationStream.Dispose();
+                                filestream.Dispose();
+                                try { File.Delete(firstPassTempFile!); } catch { /* non-fatal, swept later */ }
+                                readCounting = 0;
+                                _skipNameReviewOnce = true;
+                                try { return await GetSpreadsheetDataNew(browserFile, id); }
+                                finally { _skipNameReviewOnce = false; }
+                            }
+                        }
+
                         // DOBISSUES count: computed here rather than taken from the
                         // matcher's return value, since that older count only
                         // reflected one of two DOB-mismatch detection paths (see
@@ -4011,6 +4042,28 @@
                         // report" bug fixed the same way: sourced from whatever in
                         // mainMatcherTransformer fails ISCleaned, not from _duplicatesInd.
                         _lastUnlBatchBus = mainMatcherTransformer.Where(r => !ISCleaned(r)).ToList();
+
+                        // ── Name review pause ──────────────────────────────────────────
+                        // If any records are unloadable ONLY because of reviewable name flags, let the user
+                        // decide on them now. If any decisions were saved, re-run this file so they apply:
+                        // corrections and trust are applied right after the read, so the whole pipeline (dedup,
+                        // cross-record checks, ISCleaned) then sees the reviewed names. Nothing has been written
+                        // yet at this point, so the abandoned first pass leaves no output behind.
+                        if (!_skipNameReviewOnce)
+                        {
+                            var nameReviewQueue = BuildNameReviewQueueBus(_lastUnlBatchBus);
+                            if (nameReviewQueue.Count > 0 && await ReviewNamesAsync(NameReviewFileKind.Business, nameReviewQueue, filename) > 0)
+                            {
+                                var firstPassTempFile = FullExcelDataFilePath;
+                                destinationStream.Dispose();
+                                filestream.Dispose();
+                                try { File.Delete(firstPassTempFile!); } catch { /* non-fatal, swept later */ }
+                                readCounting = 0;
+                                _skipNameReviewOnce = true;
+                                try { return await GetSpreadsheetDataNew(browserFile, id); }
+                                finally { _skipNameReviewOnce = false; }
+                            }
+                        }
                         _lastDuplicateCountBus = _duplicatesInd?.Count ?? 0;
                         _lastTotalRecordsBus = mainMatcherTransformer.Count + _lastDuplicateCountBus;
                         _lastUnlFilename = filename;
@@ -4359,15 +4412,28 @@
     {
         foreach (var ic in records)
         {
+            var dob = NameReviewText.NormalizeDob(ic.DateOfBirth?.Data);
+            var ids = NameReviewText.BuildAnchorIds(IndividualAnchorIdValues(ic));
             var result = index.Evaluate(
                 ic.CustomerID?.Data,
                 NameReviewText.NameKey(ic.Surname?.Data, ic.FirstName?.Data, ic.MiddleNames?.Data),
-                NameReviewText.NormalizeDob(ic.DateOfBirth?.Data),
-                NameReviewText.BuildAnchorIds(IndividualAnchorIdValues(ic)));
+                dob, ids);
             ic.NameReviewTrusted = result.Decision == NameTrustDecision.Trusted;
             ic.NameReviewVetoed = result.Decision == NameTrustDecision.Vetoed;
             if (ic.NameReviewTrusted && string.IsNullOrWhiteSpace(ic.ReferenceNameTrustNote))
                 ic.ReferenceNameTrustNote = "NAME REVIEW — " + result.Reason;
+
+            // Snapshot for the Name Review screen -- taken HERE because this is the only point where the
+            // raw text (OldData) and anchors are right; ISCleaned replaces the name cells later.
+            ic.NameReview = new NameReviewSnapshot
+            {
+                CustomerKey = NormalizeCustomerId(ic.CustomerID?.Data),
+                RawSurname = ic.Surname?.OldData ?? string.Empty,
+                RawFirstName = ic.FirstName?.OldData ?? string.Empty,
+                RawMiddleNames = ic.MiddleNames?.OldData ?? string.Empty,
+                Dob = dob,
+                AnchorIds = ids,
+            };
         }
     }
 
@@ -4375,15 +4441,125 @@
     {
         foreach (var bc in records)
         {
+            var ids = NameReviewText.BuildAnchorIds(new string?[] { bc.Busregnum?.Data, bc.Tinum?.Data });
             var result = index.Evaluate(
                 bc.CustomerID?.Data,
                 NameReviewText.NameKey(bc.Businessname?.Data),
-                string.Empty,
-                NameReviewText.BuildAnchorIds(new string?[] { bc.Busregnum?.Data, bc.Tinum?.Data }));
+                string.Empty, ids);
             bc.NameReviewTrusted = result.Decision == NameTrustDecision.Trusted;
             bc.NameReviewVetoed = result.Decision == NameTrustDecision.Vetoed;
             if (bc.NameReviewTrusted && string.IsNullOrWhiteSpace(bc.ReferenceNameTrustNote))
                 bc.ReferenceNameTrustNote = "NAME REVIEW — " + result.Reason;
+
+            bc.NameReview = new NameReviewSnapshot
+            {
+                CustomerKey = NormalizeCustomerId(bc.CustomerID?.Data),
+                RawBusinessName = bc.Businessname?.OldData ?? string.Empty,
+                AnchorIds = ids,
+            };
+        }
+    }
+
+    // ── Name review queue (what the Name Review screen lists) ───────────────────────
+    // Built from the run's UNL batch AFTER ISCleaned: a record qualifies only when every reason it is
+    // unloadable is a reviewable name flag (see NameReviewClassifier). Records a reviewer already rejected
+    // or revoked are skipped so they don't come back every run.
+    static List<CellState> CollectCellStates(object record)
+        => record.GetType().GetProperties()
+            .Where(p => p.PropertyType == typeof(CellDataAndStatus) && p.GetIndexParameters().Length == 0)
+            .Select(p => (Name: p.Name, Cell: p.GetValue(record) as CellDataAndStatus))
+            .Where(x => x.Cell != null)
+            .Select(x => new CellState(x.Name, x.Cell!.Passed, (IReadOnlyList<string>?)x.Cell.Errors ?? Array.Empty<string>()))
+            .ToList();
+
+    NameProbe BuildNameProbeInd(IndividualContext ic)
+    {
+        // The probe re-tests the name with the cleaner's own helpers because some messages are ambiguous
+        // ("...ARE MANDATORY..." is raised both for a restricted word and for a blank surname).
+        var parts = new[] { ic.Surname?.Data ?? string.Empty, ic.FirstName?.Data ?? string.Empty, ic.MiddleNames?.Data ?? string.Empty };
+        var raw = ic.NameReview == null ? parts : new[] { ic.NameReview.RawSurname, ic.NameReview.RawFirstName, ic.NameReview.RawMiddleNames };
+        var upper = string.Join(" ", parts).Trim().ToUpperInvariant();
+        return new NameProbe(
+            SpecialCharacter: raw.Any(p => InvalidCharacterTest(NameReviewFileKind.Individual)(p)),
+            RestrictedWord: parts.Any(ContainsRestrictedWord),
+            MultipleIndividuals: upper.Contains(" AND ") || upper.EndsWith(" AND"));
+    }
+
+    NameProbe BuildNameProbeBus(BusinessContext bc)
+    {
+        var raw = bc.NameReview?.RawBusinessName ?? bc.Businessname?.OldData ?? string.Empty;
+        return new NameProbe(SpecialCharacter: InvalidCharacterTest(NameReviewFileKind.Business)(raw));
+    }
+
+    /// <summary>The cleaner's own invalid-character test for a name part, per file kind (used for validation and the probe).</summary>
+    Func<string, bool> InvalidCharacterTest(string fileKind)
+        => string.Equals(fileKind, NameReviewFileKind.Business, StringComparison.OrdinalIgnoreCase)
+            ? s => stringHelper.ContainsInvalidCharactersBusiness(stringHelper.RemoveSystemErroNames(s).Replace(".", " ").Replace(",", " "))
+            : s => stringHelper.ContainsInvalidCharacters(stringHelper.NormalizeApostrophes(s)) || s.Contains(',');
+
+    List<NameReviewItem> BuildNameReviewQueueInd(IEnumerable<IndividualContext> unlBatch)
+    {
+        var rows = new List<(NameReviewSnapshot, NameReviewVerdict)>();
+        foreach (var ic in unlBatch)
+        {
+            if (ic.NameReview == null || ic.NameReviewVetoed) continue;
+            rows.Add((ic.NameReview, NameReviewClassifier.Classify(NameReviewFileKind.Individual, CollectCellStates(ic), BuildNameProbeInd(ic))));
+        }
+        return NameReviewQueue.Group(NameReviewFileKind.Individual, rows);
+    }
+
+    List<NameReviewItem> BuildNameReviewQueueBus(IEnumerable<BusinessContext> unlBatch)
+    {
+        var rows = new List<(NameReviewSnapshot, NameReviewVerdict)>();
+        foreach (var bc in unlBatch)
+        {
+            if (bc.NameReview == null || bc.NameReviewVetoed) continue;
+            rows.Add((bc.NameReview, NameReviewClassifier.Classify(NameReviewFileKind.Business, CollectCellStates(bc), BuildNameProbeBus(bc))));
+        }
+        return NameReviewQueue.Group(NameReviewFileKind.Business, rows);
+    }
+
+    bool _skipNameReviewOnce;
+
+    /// <summary>
+    /// Shows the Name Review dialog and saves whatever the user decided. Returns how many decisions were saved.
+    /// The screen is open to every user; each saved row records who decided (DecidedBy).
+    /// </summary>
+    async Task<int> ReviewNamesAsync(string fileKind, List<NameReviewItem> queue, string fileName)
+    {
+        try
+        {
+            var subscriberCode = await DataManagementService.GetFileShortCodeFromFileName(fileName);
+            var reviewer = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User.Identity?.Name ?? string.Empty;
+            var parameters = new DialogParameters<NameReviewDialog>
+            {
+                { d => d.Items, queue },
+                { d => d.InvalidCharacters, InvalidCharacterTest(fileKind) },
+            };
+            var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false };
+            var dialog = await DialogService.ShowAsync<NameReviewDialog>("Names awaiting review", parameters, options);
+            var result = await dialog.Result;
+            if (result == null || result.Canceled || result.Data is not List<(NameReviewItem Item, NameReviewDecision Decision)> decisions) return 0;
+
+            var saved = 0;
+            foreach (var (item, decision) in decisions)
+            {
+                var (entry, error) = NameReviewCapture.Build(item, subscriberCode, decision, reviewer, DateTime.UtcNow, InvalidCharacterTest(fileKind));
+                if (entry == null)
+                {
+                    Snackbar.Add($"{item.DisplayName}: {error}", MudBlazor.Severity.Warning);
+                    continue;
+                }
+                await DataManagementService.SaveNameReviewDecisionAsync(entry);
+                saved++;
+            }
+            if (saved > 0) Snackbar.Add($"{saved} name decision(s) saved - re-running this file with them applied.", MudBlazor.Severity.Success);
+            return saved;
+        }
+        catch (Exception)
+        {
+            Snackbar.Add("The name review could not be completed; continuing without it.", MudBlazor.Severity.Warning);
+            return 0;
         }
     }
 
@@ -6486,8 +6662,10 @@
             // never got one.
             var cellProperties = new List<CellDataAndStatus?>
                 {
-                    individualRow.CreditFacilityAccNum,individualRow.CustomerID,individualRow.BranchCode,individualRow.NatIDNum,individualRow.Gender,
-                    individualRow.DateOfBirth,individualRow.Surname,individualRow.CurResAddr1,individualRow.PostAddrLine1,
+                    individualRow.CreditFacilityAccNum, individualRow.CustomerID, individualRow.BranchCode,
+                    individualRow.NatIDNum, individualRow.VotersIDNum, individualRow.DriverLicNum,
+                    individualRow.PassportNum, individualRow.SSNum, individualRow.Gender,
+                    individualRow.DateOfBirth, individualRow.Surname, individualRow.CurResAddr1, individualRow.PostAddrLine1,
                     individualRow.CreditFacilityType,individualRow.FacilityTerm,individualRow.AmountCurrency,
                     individualRow.FacilityAmount,individualRow.DisbursementDate,individualRow.DisbursementAmt,individualRow.MaturityDate,
                     individualRow.SchdInstalAmount,individualRow.RepaymentFreq,individualRow.CurBal,individualRow.CurBalIndicator,individualRow.AmountInArrears,
@@ -7849,18 +8027,19 @@
                 }
                 return true;
             }
-            const string sequentialIdMsg = "ID APPEARS TO BE A SEQUENTIAL PLACEHOLDER VALUE (e.g. 123456789) — PROVIDE A VALID ID";
-            var allIdFields = new (CellDataAndStatus? field, string label)[]
+            var primaryIdFields = new (CellDataAndStatus? field, string label)[]
             {
-                (ic.NatIDNum, "NATIDNUM"), (ic.VotersIDNum, "VOTERSIDNUM"), (ic.DriverLicNum, "DRIVERLICNUM"),
-                (ic.PassportNum, "PASSPORTNUM"), (ic.SSNum, "SSNUM"), (ic.EzwichNum, "EZWICHNUM"), (ic.OtherIDNum, "OTHERIDNUM"),
-                (ic.TINum, "TINUM")
+                (ic.NatIDNum, "NATIDNUM"), (ic.VotersIDNum, "VOTERSIDNUM"),
+                (ic.DriverLicNum, "DRIVERLICNUM"), (ic.PassportNum, "PASSPORTNUM"),
+                (ic.SSNum, "SSNUM")
             };
-            foreach (var (idField, idLabel) in allIdFields)
+            foreach (var (idField, idLabel) in primaryIdFields)
             {
                 if (IsSequentialPlaceholderDigits(idField?.Data))
                 {
-                    AddCellError(idField, sequentialIdMsg);
+                    AddCellError(
+                        idField,
+                        $"{idLabel}: ID APPEARS TO BE A SEQUENTIAL PLACEHOLDER VALUE (e.g. 123456789) — PROVIDE A VALID ID");
                 }
             }
 
@@ -7869,7 +8048,7 @@
             // always contains at least one digit. People often enter these
             // meaning "the real ID for this person is a staff/Ghana Card/
             // student ID", not literally the word itself. Flag as invalid
-            // ONLY when NONE of the 8 ID columns has a genuinely valid-
+            // ONLY when NONE of the primary ID columns has a genuinely valid-
             // looking (digit-containing) value -- if even one other column
             // does, that's a usable ID for this person and the label
             // elsewhere shouldn't fail the record (same "either ID is
@@ -7884,11 +8063,11 @@
                 var cleaned = new string(value.Where(c => !char.IsWhiteSpace(c)).ToArray());
                 return cleaned.Length > 0 && cleaned.All(char.IsLetter);
             }
-            bool anyIdFieldHasDigit = allIdFields.Any(f => !string.IsNullOrWhiteSpace(f.field?.Data) && f.field!.Data!.Any(char.IsDigit));
+            bool anyIdFieldHasDigit = primaryIdFields.Any(f => !string.IsNullOrWhiteSpace(f.field?.Data) && f.field!.Data!.Any(char.IsDigit));
             if (!anyIdFieldHasDigit)
             {
-                const string alphaOnlyIdMsg = "ID APPEARS TO BE A CATEGORY LABEL (e.g. STAFF, GHANACARD, STUDENT), NOT AN ACTUAL ID NUMBER — PROVIDE A VALID ID (NO OTHER COLUMN HAS A USABLE ID EITHER)";
-                foreach (var (idField, idLabel) in allIdFields)
+                const string alphaOnlyIdMsg = "ID APPEARS TO BE A CATEGORY LABEL (e.g. STAFF, GHANACARD, STUDENT), NOT AN ACTUAL ID NUMBER — PROVIDE A VALID ID (NO PRIMARY ID COLUMN HAS A USABLE ID EITHER)";
+                foreach (var (idField, idLabel) in primaryIdFields)
                 {
                     if (IsAlphaOnlyIDValue(idField?.Data))
                     {
@@ -8489,6 +8668,8 @@
                         case "SSNum": AddCellError(ic.SSNum, ghaMsg); break;
                         case "EzwichNum": AddCellError(ic.EzwichNum, ghaMsg); break;
                         case "OtherIDNum": AddCellError(ic.OtherIDNum, ghaMsg); break;
+                        case "OtherIDType": AddCellError(ic.OtherIDType, ghaMsg); break;
+                        case "TINum": AddCellError(ic.TINum, ghaMsg); break;
                     }
                 }
             }
@@ -8549,26 +8730,17 @@
             bool DisbursementAmt = ic.DisbursementAmt.Errors == null || ic.DisbursementAmt.Errors.Count == 0;
             bool MaturityDate = ic.MaturityDate.Errors == null || ic.MaturityDate.Errors.Count == 0;
             bool CurBal = ic.CurBal.Errors == null || ic.CurBal.Errors.Count == 0;
-            // ── Previously missing from IsPassed entirely ───────────────────────
-            // VotersIDNum/DriverLicNum/PassportNum/SSNum/EzwichNum/OtherIDNum/TINum
-            // could all have AddCellError called on them (GHA-format checks,
-            // the sequential-placeholder check above, cross-record conflict
-            // checks) and it had zero effect on whether the record passed --
-            // only NatIDNum's error status was ever consulted below. A
-            // sequential placeholder like "123456789" in VotersIDNum, for
-            // example, got visibly flagged but never actually failed the record.
+            // F-J are the primary ID columns. Errors on supplementary ID columns
+            // K-N are not independent reasons to reject an otherwise valid row.
             bool VotersID = ic.VotersIDNum.Errors == null || ic.VotersIDNum.Errors.Count == 0;
             bool DriverLic = ic.DriverLicNum.Errors == null || ic.DriverLicNum.Errors.Count == 0;
             bool PassportN = ic.PassportNum.Errors == null || ic.PassportNum.Errors.Count == 0;
             bool SSN = ic.SSNum.Errors == null || ic.SSNum.Errors.Count == 0;
-            bool EzwichN = ic.EzwichNum.Errors == null || ic.EzwichNum.Errors.Count == 0;
-            bool OtherIDN = ic.OtherIDNum.Errors == null || ic.OtherIDNum.Errors.Count == 0;
-            bool TINumOk = ic.TINum.Errors == null || ic.TINum.Errors.Count == 0;
 
 
 
             ic.IsPassed = CreditFacilityAccNum && CustomerID && ids[0].Passed && Nat_id && ic.FirstName.Passed && ic.Surname.Passed && DateOfBirth && FacilityAmount && DisbursementDate &&
-            DisbursementAmt && MaturityDate && CurBal && VotersID && DriverLic && PassportN && SSN && EzwichN && OtherIDN && TINumOk;
+            DisbursementAmt && MaturityDate && CurBal && VotersID && DriverLic && PassportN && SSN;
             return ic.IsPassed;
         }
         if (typeof(T) == typeof(BusinessContextDud))
