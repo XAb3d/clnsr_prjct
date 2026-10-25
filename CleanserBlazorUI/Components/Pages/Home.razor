@@ -4359,15 +4359,28 @@
     {
         foreach (var ic in records)
         {
+            var dob = NameReviewText.NormalizeDob(ic.DateOfBirth?.Data);
+            var ids = NameReviewText.BuildAnchorIds(IndividualAnchorIdValues(ic));
             var result = index.Evaluate(
                 ic.CustomerID?.Data,
                 NameReviewText.NameKey(ic.Surname?.Data, ic.FirstName?.Data, ic.MiddleNames?.Data),
-                NameReviewText.NormalizeDob(ic.DateOfBirth?.Data),
-                NameReviewText.BuildAnchorIds(IndividualAnchorIdValues(ic)));
+                dob, ids);
             ic.NameReviewTrusted = result.Decision == NameTrustDecision.Trusted;
             ic.NameReviewVetoed = result.Decision == NameTrustDecision.Vetoed;
             if (ic.NameReviewTrusted && string.IsNullOrWhiteSpace(ic.ReferenceNameTrustNote))
                 ic.ReferenceNameTrustNote = "NAME REVIEW — " + result.Reason;
+
+            // Snapshot for the Name Review screen -- taken HERE because this is the only point where the
+            // raw text (OldData) and anchors are right; ISCleaned replaces the name cells later.
+            ic.NameReview = new NameReviewSnapshot
+            {
+                CustomerKey = NormalizeCustomerId(ic.CustomerID?.Data),
+                RawSurname = ic.Surname?.OldData ?? string.Empty,
+                RawFirstName = ic.FirstName?.OldData ?? string.Empty,
+                RawMiddleNames = ic.MiddleNames?.OldData ?? string.Empty,
+                Dob = dob,
+                AnchorIds = ids,
+            };
         }
     }
 
@@ -4375,16 +4388,82 @@
     {
         foreach (var bc in records)
         {
+            var ids = NameReviewText.BuildAnchorIds(new string?[] { bc.Busregnum?.Data, bc.Tinum?.Data });
             var result = index.Evaluate(
                 bc.CustomerID?.Data,
                 NameReviewText.NameKey(bc.Businessname?.Data),
-                string.Empty,
-                NameReviewText.BuildAnchorIds(new string?[] { bc.Busregnum?.Data, bc.Tinum?.Data }));
+                string.Empty, ids);
             bc.NameReviewTrusted = result.Decision == NameTrustDecision.Trusted;
             bc.NameReviewVetoed = result.Decision == NameTrustDecision.Vetoed;
             if (bc.NameReviewTrusted && string.IsNullOrWhiteSpace(bc.ReferenceNameTrustNote))
                 bc.ReferenceNameTrustNote = "NAME REVIEW — " + result.Reason;
+
+            bc.NameReview = new NameReviewSnapshot
+            {
+                CustomerKey = NormalizeCustomerId(bc.CustomerID?.Data),
+                RawBusinessName = bc.Businessname?.OldData ?? string.Empty,
+                AnchorIds = ids,
+            };
         }
+    }
+
+    // ── Name review queue (what the Name Review screen lists) ───────────────────────
+    // Built from the run's UNL batch AFTER ISCleaned: a record qualifies only when every reason it is
+    // unloadable is a reviewable name flag (see NameReviewClassifier). Records a reviewer already rejected
+    // or revoked are skipped so they don't come back every run.
+    static List<CellState> CollectCellStates(object record)
+        => record.GetType().GetProperties()
+            .Where(p => p.PropertyType == typeof(CellDataAndStatus) && p.GetIndexParameters().Length == 0)
+            .Select(p => (Name: p.Name, Cell: p.GetValue(record) as CellDataAndStatus))
+            .Where(x => x.Cell != null)
+            .Select(x => new CellState(x.Name, x.Cell!.Passed, (IReadOnlyList<string>?)x.Cell.Errors ?? Array.Empty<string>()))
+            .ToList();
+
+    NameProbe BuildNameProbeInd(IndividualContext ic)
+    {
+        // The probe re-tests the name with the cleaner's own helpers because some messages are ambiguous
+        // ("...ARE MANDATORY..." is raised both for a restricted word and for a blank surname).
+        var parts = new[] { ic.Surname?.Data ?? string.Empty, ic.FirstName?.Data ?? string.Empty, ic.MiddleNames?.Data ?? string.Empty };
+        var raw = ic.NameReview == null ? parts : new[] { ic.NameReview.RawSurname, ic.NameReview.RawFirstName, ic.NameReview.RawMiddleNames };
+        var upper = string.Join(" ", parts).Trim().ToUpperInvariant();
+        return new NameProbe(
+            SpecialCharacter: raw.Any(p => InvalidCharacterTest(NameReviewFileKind.Individual)(p)),
+            RestrictedWord: parts.Any(ContainsRestrictedWord),
+            MultipleIndividuals: upper.Contains(" AND ") || upper.EndsWith(" AND"));
+    }
+
+    NameProbe BuildNameProbeBus(BusinessContext bc)
+    {
+        var raw = bc.NameReview?.RawBusinessName ?? bc.Businessname?.OldData ?? string.Empty;
+        return new NameProbe(SpecialCharacter: InvalidCharacterTest(NameReviewFileKind.Business)(raw));
+    }
+
+    /// <summary>The cleaner's own invalid-character test for a name part, per file kind (used for validation and the probe).</summary>
+    Func<string, bool> InvalidCharacterTest(string fileKind)
+        => string.Equals(fileKind, NameReviewFileKind.Business, StringComparison.OrdinalIgnoreCase)
+            ? s => stringHelper.ContainsInvalidCharactersBusiness(stringHelper.RemoveSystemErroNames(s).Replace(".", " ").Replace(",", " "))
+            : s => stringHelper.ContainsInvalidCharacters(stringHelper.NormalizeApostrophes(s)) || s.Contains(',');
+
+    List<NameReviewItem> BuildNameReviewQueueInd(IEnumerable<IndividualContext> unlBatch)
+    {
+        var rows = new List<(NameReviewSnapshot, NameReviewVerdict)>();
+        foreach (var ic in unlBatch)
+        {
+            if (ic.NameReview == null || ic.NameReviewVetoed) continue;
+            rows.Add((ic.NameReview, NameReviewClassifier.Classify(NameReviewFileKind.Individual, CollectCellStates(ic), BuildNameProbeInd(ic))));
+        }
+        return NameReviewQueue.Group(NameReviewFileKind.Individual, rows);
+    }
+
+    List<NameReviewItem> BuildNameReviewQueueBus(IEnumerable<BusinessContext> unlBatch)
+    {
+        var rows = new List<(NameReviewSnapshot, NameReviewVerdict)>();
+        foreach (var bc in unlBatch)
+        {
+            if (bc.NameReview == null || bc.NameReviewVetoed) continue;
+            rows.Add((bc.NameReview, NameReviewClassifier.Classify(NameReviewFileKind.Business, CollectCellStates(bc), BuildNameProbeBus(bc))));
+        }
+        return NameReviewQueue.Group(NameReviewFileKind.Business, rows);
     }
 
     async Task RunCleanser(int id)

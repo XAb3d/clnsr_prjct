@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../CleanserBlazorUI/Entities/NameReviewLogEntry.cs" Link="NameReviewLogEntry.cs" />
+    <Compile Include="../../CleanserBlazorUI/Entities/NameReviewSnapshot.cs" Link="NameReviewSnapshot.cs" />
     <Compile Include="../../CleanserBlazorUI/Helpers/NameReviewTrust.cs" Link="NameReviewTrust.cs" />
+    <Compile Include="../../CleanserBlazorUI/Helpers/NameReviewQueue.cs" Link="NameReviewQueue.cs" />
   </ItemGroup>
 </Project>

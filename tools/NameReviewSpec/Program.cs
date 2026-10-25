@@ -1,4 +1,4 @@
-// Scenario suite for the name-review trust / correction logic (Helpers/NameReviewTrust.cs).
+// Scenario suite for the name-review logic (Helpers/NameReviewTrust.cs and NameReviewQueue.cs).
 // Run from the repo root:  dotnet run --project tools/NameReviewSpec
 // Compiles the REAL source files (linked, not copied); not part of CleanserProject.sln.
 
@@ -127,6 +127,8 @@ Check("BUS rejected same cust -> Vetoed", BusIdx(Bus(21, "Rejected", "21715", "S
     .Evaluate("21715", NameReviewText.NameKey("SUMBO WOMEN EMPOWERMENT ORG"), "", "").Decision == NameTrustDecision.Vetoed);
 var busFix = Bus(22, "Approved", "21715", "ACME & SONS#", "ACME & SONS", "AB12345", flags: "SpecialCharacter");
 Check("BUS correction found", BusIdx(busFix).FindCorrection("21715", "ACME & SONS#")?.CorrectedBusinessName == "ACME & SONS");
+
+QueueSpec.Run(Check);
 
 Console.WriteLine($"{pass} passed, {fail} failed");
 return fail == 0 ? 0 : 1;
