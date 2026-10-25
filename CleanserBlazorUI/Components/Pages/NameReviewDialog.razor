@@ -1,0 +1,107 @@
+@using CleanserBlazorUI.Entities
+@using CleanserBlazorUI.Helpers
+
+@* Name Review: names that are unloadable ONLY because of flags a person can judge.
+   Open to every user; every decision is stored with who made it (NameReviewLog.DecidedBy).
+   Approve = "this name is right" (edit the text first to correct it); Reject = "this name is not valid".
+   A name flagged for special characters cannot be approved until the text is corrected -- the
+   loader rejects those characters. Undecided rows are left alone and stay UNL. *@
+<MudDialog>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-3">
+            These records are unloadable only because of the name flags shown. Correct the text if needed, then
+            approve or reject. Approved names stop flagging for this person on later files; rejected names stay
+            unloadable and won't be asked about again. Anything you leave undecided stays unloadable.
+        </MudText>
+        @foreach (var row in _rows)
+        {
+            var error = Error(row);
+            <MudPaper Outlined="true" Class="pa-3 mb-3">
+                <MudText Typo="Typo.subtitle1">@row.Item.DisplayName</MudText>
+                <MudText Typo="Typo.caption" Class="mb-2">
+                    Customer @row.Item.CustomerKey, @row.Item.RecordCount record(s) — @string.Join("; ", row.Item.Flags.Select(Describe))
+                </MudText>
+                @if (row.Item.IsBusiness)
+                {
+                    <MudTextField @bind-Value="row.Business" Label="Business name" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
+                }
+                else
+                {
+                    <MudStack Row="true">
+                        <MudTextField @bind-Value="row.Surname" Label="Surname" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
+                        <MudTextField @bind-Value="row.FirstName" Label="First name" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
+                        <MudTextField @bind-Value="row.MiddleNames" Label="Middle names" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true" />
+                    </MudStack>
+                }
+                <MudStack Row="true" AlignItems="AlignItems.Center" Class="mt-2">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small" Disabled="@(error != null)"
+                               OnClick="@(() => row.Choice = NameReviewStatus.Approved)">Approve</MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                               OnClick="@(() => row.Choice = NameReviewStatus.Rejected)">Reject</MudButton>
+                    <MudText Typo="Typo.caption">@(row.Choice == null ? "Undecided" : row.Choice)</MudText>
+                </MudStack>
+                @if (error != null)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Error">@error</MudText>
+                }
+            </MudPaper>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Skip">Continue without changes</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(!_rows.Any(r => r.Choice != null))"
+                   OnClick="Apply">Save decisions and continue</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public List<NameReviewItem> Items { get; set; } = new();
+    /// <summary>The cleaner's own invalid-character test for this file kind, so the screen validates exactly as the run does.</summary>
+    [Parameter] public Func<string, bool> InvalidCharacters { get; set; } = _ => false;
+
+    sealed class Row
+    {
+        public NameReviewItem Item = null!;
+        public string Surname = string.Empty;
+        public string FirstName = string.Empty;
+        public string MiddleNames = string.Empty;
+        public string Business = string.Empty;
+        public string? Choice;   // Approved | Rejected | null (undecided)
+    }
+
+    List<Row> _rows = new();
+
+    protected override void OnInitialized()
+    {
+        // Edit fields start as the name exactly as submitted.
+        _rows = Items.Select(i => new Row
+        {
+            Item = i, Surname = i.RawSurname, FirstName = i.RawFirstName, MiddleNames = i.RawMiddleNames, Business = i.RawBusinessName,
+        }).ToList();
+    }
+
+    NameReviewDecision Decision(Row r, string status) => new(status, r.Surname, r.FirstName, r.MiddleNames, r.Business);
+
+    /// <summary>Same validation the save uses, so a row can't be approved here if saving would refuse it.</summary>
+    string? Error(Row r) => NameReviewCapture.Build(r.Item, "x", Decision(r, NameReviewStatus.Approved), "x", DateTime.UtcNow, InvalidCharacters).Error;
+
+    static string Describe(string flag) => flag switch
+    {
+        NameReviewFlagType.Keyword => "business keyword in an individual's name",
+        NameReviewFlagType.RestrictedWord => "contains a restricted word",
+        NameReviewFlagType.InvalidBusinessName => "no recognised business keyword",
+        NameReviewFlagType.SpecialCharacter => "special characters (must be corrected)",
+        _ => flag,
+    };
+
+    void Skip() => MudDialog.Cancel();
+
+    void Apply()
+    {
+        var decisions = _rows.Where(r => r.Choice != null)
+            .Select(r => (Item: r.Item, Decision: Decision(r, r.Choice!)))
+            .ToList();
+        MudDialog.Close(DialogResult.Ok(decisions));
+    }
+}

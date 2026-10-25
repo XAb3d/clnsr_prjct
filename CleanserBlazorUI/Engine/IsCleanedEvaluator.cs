@@ -743,18 +743,19 @@ public class IsCleanedEvaluator
                         }
                         return true;
                     }
-                    const string sequentialIdMsg = "ID APPEARS TO BE A SEQUENTIAL PLACEHOLDER VALUE (e.g. 123456789) — PROVIDE A VALID ID";
-                    var allIdFields = new (CellDataAndStatus? field, string label)[]
+                    var primaryIdFields = new (CellDataAndStatus? field, string label)[]
                     {
-                        (ic.NatIDNum, "NATIDNUM"), (ic.VotersIDNum, "VOTERSIDNUM"), (ic.DriverLicNum, "DRIVERLICNUM"),
-                        (ic.PassportNum, "PASSPORTNUM"), (ic.SSNum, "SSNUM"), (ic.EzwichNum, "EZWICHNUM"), (ic.OtherIDNum, "OTHERIDNUM"),
-                        (ic.TINum, "TINUM")
+                        (ic.NatIDNum, "NATIDNUM"), (ic.VotersIDNum, "VOTERSIDNUM"),
+                        (ic.DriverLicNum, "DRIVERLICNUM"), (ic.PassportNum, "PASSPORTNUM"),
+                        (ic.SSNum, "SSNUM")
                     };
-                    foreach (var (idField, idLabel) in allIdFields)
+                    foreach (var (idField, idLabel) in primaryIdFields)
                     {
                         if (IsSequentialPlaceholderDigits(idField?.Data))
                         {
-                            AddCellError(idField, sequentialIdMsg);
+                            AddCellError(
+                                idField,
+                                $"{idLabel}: ID APPEARS TO BE A SEQUENTIAL PLACEHOLDER VALUE (e.g. 123456789) — PROVIDE A VALID ID");
                         }
                     }
 
@@ -763,7 +764,7 @@ public class IsCleanedEvaluator
                     // always contains at least one digit. People often enter these
                     // meaning "the real ID for this person is a staff/Ghana Card/
                     // student ID", not literally the word itself. Flag as invalid
-                    // ONLY when NONE of the 8 ID columns has a genuinely valid-
+                    // ONLY when NONE of the primary ID columns has a genuinely valid-
                     // looking (digit-containing) value -- if even one other column
                     // does, that's a usable ID for this person and the label
                     // elsewhere shouldn't fail the record (same "either ID is
@@ -778,11 +779,11 @@ public class IsCleanedEvaluator
                         var cleaned = new string(value.Where(c => !char.IsWhiteSpace(c)).ToArray());
                         return cleaned.Length > 0 && cleaned.All(char.IsLetter);
                     }
-                    bool anyIdFieldHasDigit = allIdFields.Any(f => !string.IsNullOrWhiteSpace(f.field?.Data) && f.field!.Data!.Any(char.IsDigit));
+                    bool anyIdFieldHasDigit = primaryIdFields.Any(f => !string.IsNullOrWhiteSpace(f.field?.Data) && f.field!.Data!.Any(char.IsDigit));
                     if (!anyIdFieldHasDigit)
                     {
-                        const string alphaOnlyIdMsg = "ID APPEARS TO BE A CATEGORY LABEL (e.g. STAFF, GHANACARD, STUDENT), NOT AN ACTUAL ID NUMBER — PROVIDE A VALID ID (NO OTHER COLUMN HAS A USABLE ID EITHER)";
-                        foreach (var (idField, idLabel) in allIdFields)
+                        const string alphaOnlyIdMsg = "ID APPEARS TO BE A CATEGORY LABEL (e.g. STAFF, GHANACARD, STUDENT), NOT AN ACTUAL ID NUMBER — PROVIDE A VALID ID (NO PRIMARY ID COLUMN HAS A USABLE ID EITHER)";
+                        foreach (var (idField, idLabel) in primaryIdFields)
                         {
                             if (IsAlphaOnlyIDValue(idField?.Data))
                             {
@@ -1433,26 +1434,17 @@ public class IsCleanedEvaluator
                     bool DisbursementAmt = ic.DisbursementAmt.Errors == null || ic.DisbursementAmt.Errors.Count == 0;
                     bool MaturityDate = ic.MaturityDate.Errors == null || ic.MaturityDate.Errors.Count == 0;
                     bool CurBal = ic.CurBal.Errors == null || ic.CurBal.Errors.Count == 0;
-                    // ── Previously missing from IsPassed entirely ───────────────────────
-                    // VotersIDNum/DriverLicNum/PassportNum/SSNum/EzwichNum/OtherIDNum/TINum
-                    // could all have AddCellError called on them (GHA-format checks,
-                    // the sequential-placeholder check above, cross-record conflict
-                    // checks) and it had zero effect on whether the record passed --
-                    // only NatIDNum's error status was ever consulted below. A
-                    // sequential placeholder like "123456789" in VotersIDNum, for
-                    // example, got visibly flagged but never actually failed the record.
+                    // F-J are the primary ID columns. Errors on supplementary ID columns
+                    // K-N are not independent reasons to reject an otherwise valid row.
                     bool VotersID = ic.VotersIDNum.Errors == null || ic.VotersIDNum.Errors.Count == 0;
                     bool DriverLic = ic.DriverLicNum.Errors == null || ic.DriverLicNum.Errors.Count == 0;
                     bool PassportN = ic.PassportNum.Errors == null || ic.PassportNum.Errors.Count == 0;
                     bool SSN = ic.SSNum.Errors == null || ic.SSNum.Errors.Count == 0;
-                    bool EzwichN = ic.EzwichNum.Errors == null || ic.EzwichNum.Errors.Count == 0;
-                    bool OtherIDN = ic.OtherIDNum.Errors == null || ic.OtherIDNum.Errors.Count == 0;
-                    bool TINumOk = ic.TINum.Errors == null || ic.TINum.Errors.Count == 0;
 
 
 
                     ic.IsPassed = CreditFacilityAccNum && CustomerID && ids[0].Passed && Nat_id && ic.FirstName.Passed && ic.Surname.Passed && DateOfBirth && FacilityAmount && DisbursementDate &&
-                    DisbursementAmt && MaturityDate && CurBal && VotersID && DriverLic && PassportN && SSN && EzwichN && OtherIDN && TINumOk;
+                    DisbursementAmt && MaturityDate && CurBal && VotersID && DriverLic && PassportN && SSN;
                     return ic.IsPassed;
     }
 
@@ -1765,4 +1757,3 @@ public class IsCleanedEvaluator
             return words.Any(word => settingDataSettings.Contains(word));
         }
 }
-
