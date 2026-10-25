@@ -13,6 +13,7 @@
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<Home> Logger
+@inject IDialogService DialogService
 
 
 @attribute [Authorize]
@@ -3839,6 +3840,28 @@
                         // ISCleaned; that's what the UNL sheet itself actually shows.
                         _lastUnlBatchInd = mainMatcherTransformer.Where(r => !ISCleaned(r)).ToList();
 
+                        // ── Name review pause ──────────────────────────────────────────
+                        // If any records are unloadable ONLY because of reviewable name flags, let the user
+                        // decide on them now. If any decisions were saved, re-run this file so they apply:
+                        // corrections and trust are applied right after the read, so the whole pipeline (dedup,
+                        // cross-record checks, ISCleaned) then sees the reviewed names. Nothing has been written
+                        // yet at this point, so the abandoned first pass leaves no output behind.
+                        if (!_skipNameReviewOnce)
+                        {
+                            var nameReviewQueue = BuildNameReviewQueueInd(_lastUnlBatchInd);
+                            if (nameReviewQueue.Count > 0 && await ReviewNamesAsync(NameReviewFileKind.Individual, nameReviewQueue, filename) > 0)
+                            {
+                                var firstPassTempFile = FullExcelDataFilePath;
+                                destinationStream.Dispose();
+                                filestream.Dispose();
+                                try { File.Delete(firstPassTempFile!); } catch { /* non-fatal, swept later */ }
+                                readCounting = 0;
+                                _skipNameReviewOnce = true;
+                                try { return await GetSpreadsheetDataNew(browserFile, id); }
+                                finally { _skipNameReviewOnce = false; }
+                            }
+                        }
+
                         // DOBISSUES count: computed here rather than taken from the
                         // matcher's return value, since that older count only
                         // reflected one of two DOB-mismatch detection paths (see
@@ -4011,6 +4034,28 @@
                         // report" bug fixed the same way: sourced from whatever in
                         // mainMatcherTransformer fails ISCleaned, not from _duplicatesInd.
                         _lastUnlBatchBus = mainMatcherTransformer.Where(r => !ISCleaned(r)).ToList();
+
+                        // ── Name review pause ──────────────────────────────────────────
+                        // If any records are unloadable ONLY because of reviewable name flags, let the user
+                        // decide on them now. If any decisions were saved, re-run this file so they apply:
+                        // corrections and trust are applied right after the read, so the whole pipeline (dedup,
+                        // cross-record checks, ISCleaned) then sees the reviewed names. Nothing has been written
+                        // yet at this point, so the abandoned first pass leaves no output behind.
+                        if (!_skipNameReviewOnce)
+                        {
+                            var nameReviewQueue = BuildNameReviewQueueBus(_lastUnlBatchBus);
+                            if (nameReviewQueue.Count > 0 && await ReviewNamesAsync(NameReviewFileKind.Business, nameReviewQueue, filename) > 0)
+                            {
+                                var firstPassTempFile = FullExcelDataFilePath;
+                                destinationStream.Dispose();
+                                filestream.Dispose();
+                                try { File.Delete(firstPassTempFile!); } catch { /* non-fatal, swept later */ }
+                                readCounting = 0;
+                                _skipNameReviewOnce = true;
+                                try { return await GetSpreadsheetDataNew(browserFile, id); }
+                                finally { _skipNameReviewOnce = false; }
+                            }
+                        }
                         _lastDuplicateCountBus = _duplicatesInd?.Count ?? 0;
                         _lastTotalRecordsBus = mainMatcherTransformer.Count + _lastDuplicateCountBus;
                         _lastUnlFilename = filename;
@@ -4464,6 +4509,50 @@
             rows.Add((bc.NameReview, NameReviewClassifier.Classify(NameReviewFileKind.Business, CollectCellStates(bc), BuildNameProbeBus(bc))));
         }
         return NameReviewQueue.Group(NameReviewFileKind.Business, rows);
+    }
+
+    bool _skipNameReviewOnce;
+
+    /// <summary>
+    /// Shows the Name Review dialog and saves whatever the user decided. Returns how many decisions were saved.
+    /// The screen is open to every user; each saved row records who decided (DecidedBy).
+    /// </summary>
+    async Task<int> ReviewNamesAsync(string fileKind, List<NameReviewItem> queue, string fileName)
+    {
+        try
+        {
+            var subscriberCode = await DataManagementService.GetFileShortCodeFromFileName(fileName);
+            var reviewer = (await AuthenticationStateProvider.GetAuthenticationStateAsync()).User.Identity?.Name ?? string.Empty;
+            var parameters = new DialogParameters<NameReviewDialog>
+            {
+                { d => d.Items, queue },
+                { d => d.InvalidCharacters, InvalidCharacterTest(fileKind) },
+            };
+            var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, BackdropClick = false, CloseOnEscapeKey = false };
+            var dialog = await DialogService.ShowAsync<NameReviewDialog>("Names awaiting review", parameters, options);
+            var result = await dialog.Result;
+            if (result == null || result.Canceled || result.Data is not List<(NameReviewItem Item, NameReviewDecision Decision)> decisions) return 0;
+
+            var saved = 0;
+            foreach (var (item, decision) in decisions)
+            {
+                var (entry, error) = NameReviewCapture.Build(item, subscriberCode, decision, reviewer, DateTime.UtcNow, InvalidCharacterTest(fileKind));
+                if (entry == null)
+                {
+                    Snackbar.Add($"{item.DisplayName}: {error}", MudBlazor.Severity.Warning);
+                    continue;
+                }
+                await DataManagementService.SaveNameReviewDecisionAsync(entry);
+                saved++;
+            }
+            if (saved > 0) Snackbar.Add($"{saved} name decision(s) saved - re-running this file with them applied.", MudBlazor.Severity.Success);
+            return saved;
+        }
+        catch (Exception)
+        {
+            Snackbar.Add("The name review could not be completed; continuing without it.", MudBlazor.Severity.Warning);
+            return 0;
+        }
     }
 
     async Task RunCleanser(int id)
