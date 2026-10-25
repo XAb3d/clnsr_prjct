@@ -170,7 +170,9 @@ public class DataManagementService
         for (int i = 0; i < toInsert.Count; i += batchSize)
             await BulkInsertBatchIND(toInsert.Skip(i).Take(batchSize).ToList());
         if (toUpdate.Count > 0)
-            await _context.BulkUpdateAsync(toUpdate, new BulkConfig { BatchSize = 4000 });
+            await _context.BulkUpdateAsync(
+                toUpdate.DistinctBy(r => r.Id).ToList(),
+                new BulkConfig { BatchSize = 4000 });
 
         return changelog;
     }
@@ -297,7 +299,9 @@ public class DataManagementService
         for (int i = 0; i < toInsert.Count; i += batchSize)
             await BulkInsertBatchBUS(toInsert.Skip(i).Take(batchSize).ToList());
         if (toUpdate.Count > 0)
-            await _context.BulkUpdateAsync(toUpdate, new BulkConfig { BatchSize = 4000 });
+            await _context.BulkUpdateAsync(
+                toUpdate.DistinctBy(r => r.Id).ToList(),
+                new BulkConfig { BatchSize = 4000 });
     }
 
 
